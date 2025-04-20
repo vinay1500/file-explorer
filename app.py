@@ -28,24 +28,6 @@ def get_tree():
 def home():
     return "✅ Flask backend is running"
 
-'''
-@app.route('/api/tree', methods=['GET'])
-def get_tree():
-    def build_tree(nodes, parent_id=None):
-        return [
-            {
-                "id": n.id,
-                "parent": n.parent_id,
-                "text": n.name,
-                "type": n.type,
-                "droppable": n.type == 'folder'
-            }
-            for n in nodes if n.parent_id == parent_id
-        ]
-
-    nodes = Node.query.all()
-    return jsonify(build_tree(nodes))
-'''
 
 @app.route('/api/node', methods=['POST'])
 def create_node():
