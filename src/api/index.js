@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://vinay1234.pythonanywhere.com /api',
+  baseURL: 'https://file-explorer-backend.onrender.com/api',
 });
 
 export default api;
