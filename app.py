@@ -24,6 +24,9 @@ def get_tree():
         for n in nodes
     ])
 
+@app.route('/')
+def home():
+    return "✅ Flask backend is running"
 
 '''
 @app.route('/api/tree', methods=['GET'])
