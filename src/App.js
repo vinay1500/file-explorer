@@ -1,4 +1,3 @@
-// src/App.js
 import React from 'react';
 import { DirectoryProvider } from './context/DirectoryContext';
 import FileExplorer from './components/FileExplorer';
