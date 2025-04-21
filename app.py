@@ -66,8 +66,9 @@ def move_node(id):
     return jsonify({"id": node.id, "new_parent_id": node.parent_id})
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    print("⚙️ Running db.create_all()...")
     with app.app_context():
         db.create_all()
+    print("✅ Tables created.")
     app.run(debug=True)
-
