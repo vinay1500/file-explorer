@@ -1,4 +1,3 @@
-// src/components/FileExplorer/FolderNode.jsx
 import React, { useState } from 'react';
 import FileNode from './FileNode';
 
