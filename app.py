@@ -65,6 +65,15 @@ def move_node(id):
     db.session.commit()
     return jsonify({"id": node.id, "new_parent_id": node.parent_id})
 
+@app.route("/create-tables")
+def create_tables():
+    try:
+        with app.app_context():
+            db.create_all()
+        return "✅ Tables created successfully", 200
+    except Exception as e:
+        return f"❌ Error: {str(e)}", 500
+
 
 if __name__ == "__main__":
     print("⚙️ Running db.create_all()...")
