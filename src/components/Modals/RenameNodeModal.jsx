@@ -1,6 +1,3 @@
-// ✅ Rename Modal with Node Picker Instead of Manual ID
-
-// src/components/Modals/RenameNodeModal.jsx
 import React, { useContext, useState } from 'react';
 import { DirectoryContext } from '../../context/DirectoryContext';
 
