@@ -1,4 +1,3 @@
-// src/components/FileExplorer/FileNode.jsx
 import React from 'react';
 
 const FileNode = ({ node }) => {
