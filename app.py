@@ -1,11 +1,12 @@
 # backend/app.py
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, os
 from flask_cors import CORS
 from models import db, Node
 
 app = Flask(__name__)
 CORS(app)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://root:@localhost/file_explorer'
+app.config['SQLALCHEMY_DATABASE_URI'] =  os.environ.get("DATABASE_URL")
+#'mysql+pymysql://root:@localhost/file_explorer'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db.init_app(app)
@@ -66,6 +67,8 @@ def move_node(id):
 
 if __name__ == '__main__':
     with app.app_context():
+        db.create_all()
+    app.run(debug=True)
         db.create_all()
     app.run(debug=True)
 
