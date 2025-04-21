@@ -1,4 +1,3 @@
-// src/components/FileExplorer/index.jsx
 import React, { useContext, useEffect, useState } from 'react';
 import { DirectoryContext } from '../../context/DirectoryContext';
 import { Tree } from '@minoru/react-dnd-treeview';
@@ -61,14 +60,14 @@ const FileExplorer = () => {
   className="file-explorer"
   onClick={(e) => {
     if (e.target.classList.contains("file-explorer")) {
-      setSelectedNode(null); // ✅ Deselect if clicked on blank space
+      setSelectedNode(null); 
     }
   }}
   style={{
     padding: "10px",
     border: "1px solid #ddd",
     borderRadius: "8px",
-    minHeight: "300px", // optional: give it space to click
+    minHeight: "300px",
     backgroundColor: "#fafafa"
   }}
 >
@@ -117,7 +116,7 @@ const FileExplorer = () => {
           const handleClick = () => {
             setSelectedNode(node);
             if (node.droppable) {
-              onToggle(); // toggle open/close if folder
+              onToggle();
             }
           };
         
