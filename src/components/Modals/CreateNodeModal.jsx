@@ -1,4 +1,3 @@
-// src/components/Modals/CreateNodeModal.jsx
 import React, { useContext, useState } from 'react';
 import { DirectoryContext } from '../../context/DirectoryContext';
 
