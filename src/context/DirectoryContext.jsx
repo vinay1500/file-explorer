@@ -1,4 +1,3 @@
-// src/context/DirectoryContext.jsx
 import React, { createContext, useState, useCallback } from 'react';
 import api from '../api';
 
@@ -10,7 +9,7 @@ export const DirectoryProvider = ({ children }) => {
   const fetchTree = useCallback(async () => {
     try {
       const res = await api.get('/tree');
-      console.log('TREE:', res.data); // This should log your folder data
+      console.log('TREE:', res.data);
       setTree(res.data);
     } catch (err) {
       console.error('API fetchTree error:', err.message);
@@ -35,20 +34,7 @@ export const DirectoryProvider = ({ children }) => {
   };
   const [selectedNode, setSelectedNode] = useState(null);
 
-  /*const buildPath = (nodeId) => {
-    if (!tree || !nodeId) return [];
-  
-    const path = [];
-    let current = tree.find(n => n.id === nodeId);
-  
-    while (current) {
-      path.unshift(current);
-      current = tree.find(n => n.id === current.parent);
-    }
-  
-    return path;
-  };
-  */
+
   return (
     <DirectoryContext.Provider value={{ tree, fetchTree, setTree, createNode, renameNode, deleteNode, selectedNode, setSelectedNode}}>
       {children}
