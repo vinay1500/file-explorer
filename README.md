@@ -1,21 +1,21 @@
-# 📦 File Explorer Backend
+# File Explorer Backend
 
 This is the backend service for the File Explorer application, built with Python and Flask. It provides RESTful APIs for managing the file-directory structure.
 
-## 🚀 Features
+## Features
 
 - Create, rename, and delete folders/files
 - Persist directory structure in a PostgreSQL database
 - API endpoints for CRUD operations
 
-## 🛠️ Technologies Used
+## Technologies Used
 
 - Python
 - Flask
 - SQLAlchemy
 - PostgreSQL
 
-## 🧑‍💻 Getting Started
+## Getting Started
 
 ### Prerequisites
 
