@@ -73,20 +73,21 @@ def upgrade():
         ),
         sa.PrimaryKeyConstraint("id", name="pk_nodes"),
         sa.ForeignKeyConstraint(
-            ["owner_id"], ["users.id"], name="owner_id", ondelete="CASCADE"
+            ["owner_id"], ["users.id"], name="fk_nodes_owner_id", ondelete="CASCADE"
         ),
         # I3 -- deleting a node deletes its whole subtree. The original schema
         # had no cascade, so SQLAlchemy nulled each child's parent_id instead,
         # and NULL means root: deleting a folder emptied it onto the top level.
         sa.ForeignKeyConstraint(
-            ["parent_id"], ["nodes.id"], name="parent_id", ondelete="CASCADE"
+            ["parent_id"], ["nodes.id"], name="fk_nodes_parent_id", ondelete="CASCADE"
         ),
         # I8 -- IS DISTINCT FROM, not !=. For a nullable column `parent_id != id`
         # is NULL when parent_id is NULL, and CHECK passes on NULL, so the
         # constraint would do nothing for every root node.
-        # Bare name: the metadata naming convention in extensions.py expands
-        # this to ck_nodes_not_own_parent. Spelling out the full name here
-        # gets it prefixed twice.
+        # Bare name here, full name on the foreign keys above. The naming
+        # convention's %(constraint_name)s token exists only in the "ck"
+        # template, so a check constraint's name is a component the convention
+        # prefixes -- while an explicit foreign key name is used verbatim.
         sa.CheckConstraint("parent_id IS DISTINCT FROM id", name="not_own_parent"),
         sa.CheckConstraint("length(btrim(name)) > 0", name="name_not_blank"),
     )
