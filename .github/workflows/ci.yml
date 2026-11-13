@@ -117,7 +117,7 @@ jobs:
       - name: Lint and type check
         run: |
           ruff check .
-          ruff format --check .
+          ruff format --diff .
           mypy
 
       - name: Apply migrations
