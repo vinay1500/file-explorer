@@ -113,9 +113,7 @@ class Node(Base):
         CheckConstraint("parent_id IS DISTINCT FROM id", name="not_own_parent"),
         # Names are trimmed before storage; this rejects empty and
         # whitespace-only at the database layer regardless (F-13).
-        CheckConstraint(
-            r"length(btrim(name, E' \t\n\r\f\v')) > 0", name="name_not_blank"
-        ),
+        CheckConstraint(r"length(btrim(name, E' \t\n\r\f\v')) > 0", name="name_not_blank"),
         # I6 at the database layer -- see the migration for the reasoning.
         UniqueConstraint("id", "owner_id", name="uq_nodes_id_owner"),
         ForeignKeyConstraint(
