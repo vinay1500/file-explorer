@@ -132,7 +132,9 @@ def test_concurrent_move_four_cycle(
         the moment of commit. The service's own ordering is what the other
         tests cover; here the interleaving is the subject.
         """
-        repo = TreeService(s1, MAX_DEPTH)._repo  # noqa: SLF001 - interleaving is the subject
+        # Reaching into the service's repository on purpose: the interleaving
+        # is the subject here, so the test needs to own the moment of commit.
+        repo = TreeService(s1, MAX_DEPTH)._repo
         repo.lock_move_participants(alice, alpha, delta)
         locked_by_t1.set()
         release_t1.wait(timeout=10)
@@ -147,7 +149,9 @@ def test_concurrent_move_four_cycle(
         except CycleDetected:
             s2.rollback()
             t2_result["outcome"] = "rejected"
-        except Exception as exc:  # noqa: BLE001 - recorded, asserted on below
+        # Broad on purpose -- any unexpected failure is recorded and asserted
+        # on below, rather than vanishing into a dead thread.
+        except Exception as exc:
             s2.rollback()
             t2_result["outcome"] = f"error: {type(exc).__name__}"
 
@@ -204,7 +208,7 @@ def test_move_does_not_block_unrelated_insert(
     session.commit()
 
     s1, s2 = new_session(), new_session()
-    repo1 = TreeService(s1, MAX_DEPTH)._repo  # noqa: SLF001
+    repo1 = TreeService(s1, MAX_DEPTH)._repo
 
     # Hold the chain {elsewhere's node, home, sub}.
     repo1.lock_move_participants(alice, elsewhere, sub)
