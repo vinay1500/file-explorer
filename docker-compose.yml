@@ -1,0 +1,75 @@
+# Local development stack: database, API, web.
+#
+#   make db     postgres only — works today
+#   make up     the whole stack — needs apps/api and apps/web, which arrive
+#               with the subtree graft
+#
+# Nothing here is production configuration. The credentials below are local
+# throwaways and are deliberately in version control; real secrets live in the
+# host's secret store and never in this file.
+
+name: file-explorer
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: fe-postgres
+    environment:
+      POSTGRES_USER: fileexplorer
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: file_explorer
+      # Deterministic collation so index ordering matches CI and production.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # The API waits on this rather than sleeping and hoping.
+      test: ["CMD-SHELL", "pg_isready -U fileexplorer -d file_explorer"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+      target: dev
+    container_name: fe-api
+    environment:
+      DATABASE_URL: postgresql://fileexplorer:localdev@postgres:5432/file_explorer
+      TEST_DATABASE_URL: postgresql://fileexplorer:localdev@postgres:5432/file_explorer_test
+      FLASK_DEBUG: "1"
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      SECRET_KEY: local-dev-only-not-a-secret
+      JWT_SECRET_KEY: local-dev-only-not-a-secret
+    ports:
+      - "5000:5000"
+    volumes:
+      # Source mounted for reload; the venv stays inside the image.
+      - ./apps/api:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      target: dev
+    container_name: fe-web
+    environment:
+      VITE_API_BASE_URL: http://localhost:5000/api/v1
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
