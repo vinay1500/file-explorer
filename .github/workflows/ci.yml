@@ -274,7 +274,7 @@ jobs:
           # G-02: btrim(name) with one argument trims SPACES only, so a tab
           # survives it. Red until the constraint is widened.
           rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)
-                    VALUES (5, 1, NULL, E'\\t', 'folder');" \\
+                    VALUES (5, 1, NULL, E'\\t', 'folder');" \
             || fail "G-02: a tab-only name was accepted"
           echo "  G-02 tab-only name rejected"
 
@@ -288,7 +288,7 @@ jobs:
             INSERT INTO nodes (id, owner_id, parent_id, name, type)
               VALUES (6, 2, NULL, 'bob-root', 'folder');" >/dev/null
           rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)
-                    VALUES (7, 1, 6, 'stolen', 'folder');" \\
+                    VALUES (7, 1, 6, 'stolen', 'folder');" \
             || fail "G-01: a node was attached under another user's parent"
           echo "  G-01 cross-owner attach rejected"
           psql -c "DELETE FROM nodes WHERE id IN (6,7); DELETE FROM users WHERE id = 2;" >/dev/null
