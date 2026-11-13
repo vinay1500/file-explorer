@@ -11,6 +11,7 @@ See `docs/adr/0003` for why row locks rather than SERIALIZABLE, and
 from __future__ import annotations
 
 import logging
+import random
 import time
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
@@ -27,7 +28,14 @@ from file_explorer.repositories.node_repo import NodeRepository
 
 log = logging.getLogger(__name__)
 
-DEADLOCK = "40P01"
+# 40P01 deadlock_detected, 55P03 lock_not_available.
+#
+# 55P03 is the one that will actually happen. lock_timeout is 3s and
+# statement_timeout 5s, so a chain held by a slow transaction surfaces as a
+# lock timeout long before the deterministic lock order could produce a
+# deadlock. Handling only 40P01 would mean the realistic contention path
+# reaches the caller as an unhandled driver error.
+RETRYABLE = frozenset({"40P01", "55P03"})
 _MAX_ATTEMPTS = 3
 
 
@@ -48,26 +56,40 @@ class TreeService:
     def move(self, actor_id: int, node_id: int, new_parent_id: int | None) -> None:
         """Re-parent `node_id` under `new_parent_id`, or to the root if None.
 
-        Retries on deadlock. `ORDER BY id` on the locking select gives every
-        move the same lock order, but a concurrent cascading delete locks in
-        scan order, so `40P01` is still reachable — the lock order makes it
-        rare, not impossible, which is why this loop exists rather than a
-        comment claiming it cannot happen.
+        **Transaction contract.** This does not commit — the caller owns the
+        transaction and decides when to end it. But on a retryable failure it
+        *does* roll back, because the failed transaction cannot be continued.
+        That discards any uncommitted work the caller had in the same
+        transaction. So either call this with nothing else pending, or be
+        prepared to redo that work.
+
+        Retries on `40P01` and `55P03`. `ORDER BY id` on the locking select
+        gives every move the same lock order, but a concurrent cascading delete
+        locks in scan order, so a deadlock stays reachable — the lock order
+        makes it rare, not impossible. A lock timeout is the more likely of the
+        two, since `lock_timeout` is three seconds.
+
+        After `_MAX_ATTEMPTS` the driver error propagates. The HTTP layer maps
+        it to 503 rather than 500: the request was valid and may succeed later.
         """
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             try:
                 self._move_once(actor_id, node_id, new_parent_id)
                 return
             except DBAPIError as exc:
-                if getattr(getattr(exc, "orig", None), "sqlstate", None) != DEADLOCK:
+                sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+                if sqlstate not in RETRYABLE:
                     raise
                 self._s.rollback()
                 if attempt == _MAX_ATTEMPTS:
                     raise
                 log.warning(
-                    "deadlock on move, retrying", extra={"attempt": attempt, "node_id": node_id}
+                    "contention on move, retrying",
+                    extra={"attempt": attempt, "node_id": node_id, "sqlstate": sqlstate},
                 )
-                time.sleep(0.02 * attempt)
+                # Linear backoff with jitter. Without jitter two transactions
+                # retrying in step keep colliding on the same schedule.
+                time.sleep(0.02 * attempt + random.uniform(0, 0.02))
 
     def _move_once(self, actor_id: int, node_id: int, new_parent_id: int | None) -> None:
         if node_id == new_parent_id:

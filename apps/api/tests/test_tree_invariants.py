@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from file_explorer.models import Node
 from file_explorer.errors import (
     CycleDetected,
     DepthExceeded,
@@ -167,6 +168,37 @@ def test_move_to_root_does_not_delete_subtree(
     assert _parent_of(session, b) is None
     assert _parent_of(session, c) == b, "the subtree did not travel with its parent"
     assert _parent_of(session, a) is None
+
+
+@pytest.mark.invariant
+def test_orm_de_association_does_not_delete(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """G-03, tested where it actually lives.
+
+    The test above goes through the service, which writes with raw SQL -- so it
+    never touches the ORM relationship and would pass even with
+    `delete-orphan` restored. This one sets `parent` to None through the ORM,
+    which is precisely the de-association that `delete-orphan` turns into a
+    DELETE.
+
+    Restore `cascade="all, delete-orphan"` on `Node.children` and this test
+    fails. That is the only reason it exists.
+    """
+    a = make_node(alice, "docs")
+    b = make_node(alice, "work", parent_id=a)
+    c = make_node(alice, "notes.txt", parent_id=b, type_="file")
+    session.commit()
+
+    node = session.get(Node, b)
+    assert node is not None
+    node.parent = None
+    session.flush()
+
+    assert _count(session) == 3, "de-association through the ORM deleted rows"
+    assert _parent_of(session, b) is None
+    assert _parent_of(session, c) == b
+    session.commit()
 
 
 # ---------------------------------------------------------------- I3 cascade
@@ -344,6 +376,48 @@ def test_path_does_not_cross_owner(
     assert "bob-private" not in names
 
 
+@pytest.mark.invariant
+def test_ancestry_walk_stops_at_the_owner_boundary(
+    svc: TreeService, session: Session, alice: int, bob: int, make_node: Callable[..., int]
+) -> None:
+    """G-05, tested by removing the constraint that makes it unreachable.
+
+    The composite foreign key means a cross-owner parent cannot exist, so the
+    owner predicate in the recursive term of `_ANCESTRY` has no reachable data
+    to defend against -- and the test above therefore could not fail if that
+    predicate were deleted.
+
+    Two independent protections, so each is tested with the other removed. Here
+    the foreign key is dropped, the illegal state is built directly, and the
+    walk is asserted to stop at the boundary anyway.
+
+    Delete `AND n.owner_id = :owner_id` from `_ANCESTRY`'s recursive term and
+    this test fails with bob's folder name in alice's breadcrumbs.
+    """
+    theirs = make_node(bob, "bob-private")
+    session.commit()
+
+    session.execute(text("ALTER TABLE nodes DROP CONSTRAINT fk_nodes_parent_same_owner"))
+    try:
+        smuggled = make_node(alice, "mine", parent_id=theirs)
+        session.commit()
+
+        names = [row["name"] for row in svc.path(alice, smuggled)]
+        assert names == ["mine"], f"the walk crossed an owner boundary: {names}"
+        assert "bob-private" not in names
+    finally:
+        session.execute(text("DELETE FROM nodes WHERE owner_id = :o"), {"o": alice})
+        session.commit()
+        session.execute(
+            text(
+                "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent_same_owner "
+                "FOREIGN KEY (parent_id, owner_id) REFERENCES nodes (id, owner_id) "
+                "ON DELETE CASCADE"
+            )
+        )
+        session.commit()
+
+
 # ---------------------------------------------------------------- I7 depth
 
 
@@ -418,6 +492,7 @@ def test_move_to_nonexistent_destination_returns_404(
     assert _parent_of(session, a) is None
 
 
+@pytest.mark.invariant
 def test_move_to_current_parent_is_a_noop(
     svc: TreeService, session: Session, alice: int, make_node: Callable[..., int]
 ) -> None:

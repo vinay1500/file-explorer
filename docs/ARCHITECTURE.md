@@ -2,10 +2,10 @@
 
 > **Project:** File Explorer · **Status:** PROPOSED — rebuild not yet started · **Updated:** 2026-11-13
 
-**Partly built.** §3 (data model) ships in PR #1 and is verified in CI. §5 (the move
-algorithm) is designed but **not written** — the recursive CTE, the locking and the service
-layer do not exist yet. §6 (API), §9 and anything touching authentication are target only.
-Items marked ✅ in §2 exist today; everything else is planned.
+**Partly built.** §3 (data model), §4 (invariants) and §5 (the move algorithm) are built and
+covered by tests that run against real PostgreSQL in CI. §6 (API conventions), §9 (observability)
+and anything touching authentication are **target only** — no blueprint, schema or session layer
+exists yet. Items marked ✅ in §2 exist today; everything else is planned.
 
 ---
 
@@ -145,14 +145,14 @@ These are the contract. Each is numbered, each has a test, and the test names th
 
 | # | Invariant | Enforced by | Test |
 |---|---|---|---|
-| **I1** | A node is never its own ancestor — no cycles | Recursive CTE check inside a row-locked transaction | `test_move_into_descendant_rejected` |
+| **I1** | A node is never its own ancestor — no cycles | Recursive CTE check, re-run inside a transaction holding row locks (see §5 for why "row-locked" alone overstates it) | `test_move_into_direct_child_rejected`, `test_move_into_distant_descendant_rejected`, `test_concurrent_move_four_cycle` |
 | **I2** | `parent_id IS NULL` means root; roots are scoped per owner | `uq_nodes_root_name` | `test_root_names_unique_per_owner` |
-| **I3** | Deleting a node deletes its entire subtree — no orphans | `ON DELETE CASCADE` + `cascade="all, delete-orphan"` | `test_delete_cascades_whole_subtree` |
-| **I4** | Sibling names are unique within a parent | `uq_nodes_parent_name` | `test_duplicate_sibling_name_rejected` |
+| **I3** | Deleting a node deletes its entire subtree — no orphans | `ON DELETE CASCADE`. **Not** `delete-orphan`, which deletes on de-association and so would destroy a subtree on move-to-root | `test_delete_cascades_whole_subtree`, `test_orm_de_association_does_not_delete` |
+| **I4** | Sibling names are unique within a parent | `uq_nodes_parent_name` | `test_duplicate_sibling_name_returns_409` |
 | **I5** | A file is always a leaf | Service layer rejects a move into a `file` | `test_cannot_move_into_a_file` |
-| **I6** | Every node in a subtree shares one `owner_id` | Service layer; move validates both ends | `test_cannot_move_across_owners` |
-| **I7** | Depth never exceeds 64 levels | Depth check in the move/create service | `test_depth_cap_enforced` |
-| **I8** | A node's `id` never equals its `parent_id` | `ck_nodes_not_own_parent` | `test_self_parent_rejected_at_db_layer` |
+| **I6** | Every node in a subtree shares one `owner_id` | Composite FK `(parent_id, owner_id) → (id, owner_id)`, **and** the service validating both ends | `test_cannot_move_another_users_node`, `test_composite_key_blocks_cross_owner_attach`, `test_ancestry_walk_stops_at_the_owner_boundary` |
+| **I7** | Depth never exceeds 64 levels | `depth(destination) + 1 + height(subtree)` — both walks, not just the ascending one | `test_depth_counts_subtree_height`, `test_move_within_depth_budget_allowed` |
+| **I8** | A node's `id` never equals its `parent_id` | `ck_nodes_not_own_parent` | `test_self_parent_rejected` |
 
 I8 is enforced at the database layer deliberately: it is the one case the current code already
 checks in Python, and pushing it into a constraint means no future code path can bypass it.
@@ -220,8 +220,10 @@ serialisation under row locks*, not "a row-locked transaction". See `docs/adr/00
 `depth(destination) + 1 + height(subtree(node))`, which needs a descending walk as well as the
 ascending one — otherwise two legal 60-deep chains compose into a 120-deep tree in one move.
 
-`test_concurrent_move_race` drives two real connections against the compose database and asserts
-exactly one succeeds and the tree is still acyclic.
+`test_concurrent_move_four_cycle` drives two real connections and asserts the second **blocks**
+before the first commits, then is rejected after re-reading. It is a four-cycle across two
+separate trees rather than the obvious two-cycle, because the two-cycle passes against an
+implementation that reuses the rows its locking select returned.
 
 ---
 

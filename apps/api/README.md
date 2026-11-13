@@ -3,9 +3,10 @@
 The Flask API. Owns the tree: creation, renaming, moving, deletion, and the invariants that keep
 it a tree.
 
-> **Being rebuilt.** The original four files from April 2025 have been retired; the schema and
-> its constraints are in place and verified in CI. The move algorithm, the API layer and the
-> test suite do not exist yet.
+> **Being rebuilt.** The original four files from April 2025 have been retired. The schema, the
+> move algorithm and the test suite are in place and run against real PostgreSQL in CI. The HTTP
+> layer — blueprints, request schemas, the error contract — does not exist yet; it arrives at M3,
+> so there is currently no way to reach any of this over a network.
 
 ## What the original version got wrong
 

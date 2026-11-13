@@ -115,14 +115,15 @@ make help      # every available command
 you have Docker. *That path has not been exercised here* — development runs against the
 PostgreSQL service container in CI, so CI is where every command is actually proven.
 
-**What does not work yet:** `make up`, `make test-api` and the rest. The application images and
-the test suite are being written; those targets fail with a pointer rather than a confusing
-build error. This section gets updated as each one starts working — see the
-[change log](docs/book/) for what landed when.
+**What does not work yet:** `make up`, `make test-api` and the other container targets. There
+are no application images, so those fail with a pointer rather than a confusing build error.
+This section gets updated as each one starts working — see the
+[change log](docs/book/CHANGELOG.md) for what landed when.
 
-When the test suite exists it will run against PostgreSQL, never SQLite. Recursive CTEs,
-`SELECT … FOR UPDATE` and partial unique indexes all behave differently there, so a suite that
-passes on SQLite has tested a different program.
+**The tests do run**, in CI, against PostgreSQL 17 — never SQLite. Recursive CTEs,
+`SELECT … FOR NO KEY UPDATE` and partial unique indexes all behave differently there, so a suite
+that passes on SQLite has tested a different program. See
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml); the `tests` job is the one to read.
 
 ---
 

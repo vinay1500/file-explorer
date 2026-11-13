@@ -167,7 +167,23 @@ jobs:
               VALUES (1, 1, NULL, 'docs', 'folder');" >/dev/null
 
           fail() { echo "::error::$1"; exit 1; }
-          rejected() { ! psql -v ON_ERROR_STOP=1 -c "$1" >/dev/null 2>&1; }
+
+          # Requires the failure to be a CONSTRAINT violation, not just any
+          # error. The previous version swallowed stderr, so a typo in the SQL
+          # looked identical to a guard firing -- and these assertions are the
+          # only coverage the CHECK constraints have outside pytest.
+          rejected() {
+            local out
+            if out=$(psql -v ON_ERROR_STOP=1 -c "$1" 2>&1); then
+              return 1   # statement succeeded, so nothing was rejected
+            fi
+            if echo "$out" | grep -qE 'violates (check|unique|foreign key) constraint|duplicate key value'; then
+              return 0
+            fi
+            echo "::error::statement failed, but not from a constraint:"
+            echo "$out" | head -5
+            return 1
+          }
 
           rejected "UPDATE nodes SET parent_id = 1 WHERE id = 1;" \
             || fail "I8: a node was allowed to be its own parent"
@@ -278,3 +294,8 @@ jobs:
           unmarked=$(pytest --collect-only -q -m "not invariant and not concurrency" 2>/dev/null \
                      | grep -cE '^tests/' || true)
           echo "  unmarked tests: $unmarked"
+          if [ "$unmarked" != "0" ]; then
+            echo "::error::$unmarked test(s) carry no marker and would be missed by a filtered run"
+            pytest --collect-only -q -m "not invariant and not concurrency" | grep -E '^tests/'
+            exit 1
+          fi

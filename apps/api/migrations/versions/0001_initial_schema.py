@@ -90,9 +90,12 @@ def upgrade():
         # prefixes -- while an explicit foreign key name is used verbatim.
         sa.CheckConstraint("parent_id IS DISTINCT FROM id", name="not_own_parent"),
         # btrim with ONE argument trims spaces only, so a tab-only name used
-        # to pass this. The explicit set covers ASCII whitespace; unicode
-        # whitespace (NBSP and friends) is handled by the service layer, which
-        # strips and NFC-normalises before it ever reaches here.
+        # to pass this. The explicit set covers ASCII whitespace.
+        #
+        # Unicode whitespace -- NBSP and friends -- is NOT covered, so a name
+        # of a single NBSP is storable today. Stripping and NFC-normalising
+        # belongs with the create and rename endpoints, which arrive at M3;
+        # there is no write path for a name yet.
         sa.CheckConstraint(r"length(btrim(name, E' \t\n\r\f\v')) > 0", name="name_not_blank"),
         # I6 -- every node in a subtree shares one owner, enforced by the
         # database rather than hoped for by the service layer.

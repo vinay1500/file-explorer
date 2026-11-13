@@ -94,9 +94,10 @@ scopes by `owner_id`, which a single constraint could not express. PostgreSQL 15
 `length(btrim(name)) > 0`, and a name consisting of a single tab character sailed through it —
 so the bug it was written to fix was never actually fixed.
 
-The explicit set covers ASCII whitespace. Unicode whitespace (NBSP and friends) is the service
-layer's job, which strips and NFC-normalises before anything reaches the database. Two layers,
-because the database gives the guarantee and the application gives the error message.
+The explicit set covers ASCII whitespace. **Unicode whitespace is not covered** — a name
+consisting of a single non-breaking space is storable today. Stripping and NFC-normalising
+belongs with the create and rename endpoints, which do not exist yet; there is currently no write
+path for a name at all. Recorded here rather than implied to be handled.
 
 > Proven by `test_whitespace_only_names_rejected`, which tries space, tab, newline and CRLF.
 
