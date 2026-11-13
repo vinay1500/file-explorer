@@ -67,9 +67,11 @@ def health():
 
 A health check must exercise the dependency it claims is healthy. Anything less is decoration.
 
-Paired with it, a scheduled GitHub Actions workflow probes that endpoint twice a day and
-**fails the workflow on any non-200**, which sends an email. Had both existed, seventeen months
-would have been about twelve hours.
+Paired with it, `.github/workflows/health-check.yml` probes that endpoint twice a day and
+**fails the workflow on any non-200**, which sends an email. It is committed and runs on
+schedule, but it exits early with a notice until the `API_URL` repository variable is set —
+there is nothing deployed to probe yet. Had both existed in 2025, seventeen months would have
+been about twelve hours.
 
 The schedule is deliberately sparse — twice daily, not every ten minutes. An earlier plan pinged
 frequently to keep the free instance warm; that was dropped. GitHub's scheduled workflows are
@@ -82,8 +84,9 @@ here is monitoring, not warming.
 The 52 seconds do not disappear. The free instance spins down after fifteen minutes idle and
 takes most of a minute to wake.
 
-Rather than hide that, the interface states it: a visible *"waking the server — this demo runs
-on a free tier and can take up to a minute"* appears when the first request passes two seconds.
+Rather than hide that, the interface will state it: a visible *"waking the server — this demo
+runs on a free tier and can take up to a minute"* when the first request passes two seconds.
+That is M6 work; the frontend has not been rebuilt yet.
 
 This reads better than a workaround. It says the infrastructure's constraints are understood and
 were handled deliberately. A blank screen for a minute says nothing — or worse, says the

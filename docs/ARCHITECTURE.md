@@ -2,9 +2,10 @@
 
 > **Project:** File Explorer · **Status:** PROPOSED — rebuild not yet started · **Updated:** 2026-11-13
 
-**Nothing in this document is built yet.** It describes the target. Items marked ✅ exist in the
-current repositories; everything else is planned. The current state is recorded separately in
-the ground-truth file.
+**Partly built.** §3 (data model) ships in PR #1 and is verified in CI. §5 (the move
+algorithm) is designed but **not written** — the recursive CTE, the locking and the service
+layer do not exist yet. §6 (API), §9 and anything touching authentication are target only.
+Items marked ✅ in §2 exist today; everything else is planned.
 
 ---
 
@@ -84,7 +85,7 @@ CREATE TYPE node_type AS ENUM ('file', 'folder');
 
 CREATE TABLE users (
     id            BIGSERIAL PRIMARY KEY,
-    email         CITEXT      NOT NULL UNIQUE,
+    email         VARCHAR(320) NOT NULL,   -- unique via lower(email), see below
     password_hash TEXT        NOT NULL,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -99,8 +100,21 @@ CREATE TABLE nodes (
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
     CONSTRAINT ck_nodes_not_own_parent CHECK (parent_id IS DISTINCT FROM id),
-    CONSTRAINT ck_nodes_name_nonempty  CHECK (length(btrim(name)) > 0)
+    CONSTRAINT ck_nodes_name_nonempty  CHECK (length(btrim(name, E' \t\n\r\f\v')) > 0)
 );
+
+-- case-insensitive email uniqueness without the citext extension, which not
+-- every managed PostgreSQL grants permission to create
+CREATE UNIQUE INDEX uq_users_email_lower ON users (lower(email));
+
+-- I6 -- every node in a subtree shares one owner, enforced by the database.
+-- The plain foreign key constrains parent_id against id alone, so a node could
+-- be attached under another user's parent and the victim's delete would then
+-- cascade into it. Referencing the pair makes that a foreign key violation.
+-- MATCH SIMPLE skips the check when parent_id is NULL, which is what a root needs.
+ALTER TABLE nodes ADD CONSTRAINT uq_nodes_id_owner UNIQUE (id, owner_id);
+ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent_same_owner
+    FOREIGN KEY (parent_id, owner_id) REFERENCES nodes (id, owner_id) ON DELETE CASCADE;
 
 -- the index that makes every child lookup and every CTE step cheap
 CREATE INDEX idx_nodes_owner_parent ON nodes (owner_id, parent_id);
@@ -166,7 +180,7 @@ SELECT id
   FROM nodes
  WHERE id IN (SELECT id FROM ancestry) OR id = :node_id
  ORDER BY id
-   FOR UPDATE;
+   FOR NO KEY UPDATE;
 
 -- 2. With the chain locked, re-run the ancestry walk. If :node_id appears in the
 --    destination's ancestry, the move would create a cycle -> 409 CYCLE_DETECTED.
@@ -178,11 +192,33 @@ COMMIT;
 
 **Why the lock is necessary.** Without it, two transactions can each read a tree in which their
 move is legal, and both commit — move A into B while moving B into A. Each check passed; the
-result is a cycle. Checking inside a transaction that holds the ancestry chain forces the second
-transaction to re-read after the first commits.
+result is a cycle.
 
-**Why `ORDER BY id`.** Two transactions locking overlapping ancestry chains in different orders
-deadlock. A deterministic order makes one of them wait instead.
+**Which lock does the work.** The lock on `:node_id`, not the destination chain. Two moves that
+could jointly close a cycle always have one's moved node inside the other's destination
+ancestry, so their lock sets necessarily intersect — including across multi-root forests and
+three-way races. Getting this the wrong way round matters, because a test built on the
+destination-chain story is the 2-cycle, and **the 2-cycle passes against a broken
+implementation**. The test that bites is a 4-cycle across two separate trees.
+
+**Why step 2 must be a fresh statement.** `FOR UPDATE` does not refresh a recursive CTE:
+`LockRows` sits above the plan and EvalPlanQual re-checks only the outer qual. Reusing the rows
+returned by step 1 — the obvious optimisation — admits a 4-cycle.
+
+**Why `FOR NO KEY UPDATE`.** `FOR UPDATE` conflicts with `FOR KEY SHARE`, the lock an `INSERT`
+takes on its parent for the foreign-key check, so holding a chain would block unrelated creates
+underneath it. `FOR NO KEY UPDATE` still excludes other moves, so the argument above holds.
+
+**Why `ORDER BY id`.** It gives every transaction the same lock order, so two overlapping chains
+queue instead of deadlocking. **This is a convention, not a guarantee** — a concurrent cascading
+delete locks in scan order and can still raise `40P01`, so the caller retries on deadlock. The
+lock set is itself computed from an unlocked read, which is the other reason step 2 re-reads.
+The honest description of this design is *an optimistic check plus best-effort chain
+serialisation under row locks*, not "a row-locked transaction". See `docs/adr/0003`.
+
+**What the depth check must measure.** Not `depth(destination) + 1`. The bound is
+`depth(destination) + 1 + height(subtree(node))`, which needs a descending walk as well as the
+ascending one — otherwise two legal 60-deep chains compose into a 120-deep tree in one move.
 
 `test_concurrent_move_race` drives two real connections against the compose database and asserts
 exactly one succeeds and the tree is still acyclic.

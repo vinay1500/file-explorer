@@ -21,8 +21,9 @@ stopped being reachable from the root, so to the user the data had vanished.
 Fixing that properly is more interesting than it first appears. A descendant check is the
 obvious answer, and it is not sufficient: two concurrent moves can each pass that check against
 a tree that is still valid at the moment they look, and commit a cycle between them. The real
-fix runs the check inside a transaction that holds row locks on the destination's ancestry
-chain, in a deterministic order.
+fix runs the check inside a transaction that row-locks the node being moved together with the
+destination's ancestry chain, in a deterministic order — and the lock that does the work is the
+one on the moved node, not the chain.
 
 That problem — and the tests that prove it is solved — is what this rebuild is about.
 
@@ -32,17 +33,21 @@ That problem — and the tests that prove it is solved — is what this rebuild 
 
 ```mermaid
 flowchart TD
-    W["apps/web — React + TypeScript<br/>drag-and-drop tree"]
+    W["apps/web — React<br/>drag-and-drop tree"]
     B["Blueprints — routing and serialisation"]
     S["Services — business rules:<br/>cycles · depth · ownership"]
     R["Repositories — SQL,<br/>including recursive CTEs"]
     D[("PostgreSQL<br/>cascades · unique indexes · checks")]
 
-    W -->|"fetch, cookie auth,<br/>types generated from OpenAPI"| B
+    W -->|"HTTP"| B
     B --> S
     S --> R
     R --> D
 ```
+
+Today only the bottom of that diagram exists: the schema and its constraints. The service,
+repository and blueprint layers, cookie authentication and generated API types are the target,
+and the frontend is still the original Create React App code.
 
 Rules that must never be violated live in the database as constraints. Rules that need a good
 error message live in the service layer. Most live in both.
@@ -64,8 +69,17 @@ nodes
   index  (owner_id, parent_id)
   unique (parent_id, name) where parent_id is not null
   unique (owner_id, name)  where parent_id is null
+  unique (id, owner_id)
   check  (parent_id is distinct from id)
+  check  (length(btrim(name, E' \t\n\r\f\v')) > 0)
+  foreign key (parent_id, owner_id) -> nodes (id, owner_id) on delete cascade
 ```
+
+That last line is the one worth noticing. A plain `parent_id -> id` foreign key constrains the
+id and nothing else, so a node could be attached under a parent belonging to a different user —
+and that user deleting the folder would cascade into it. Referencing the `(id, owner_id)` pair
+makes a cross-owner parent a foreign key violation, whatever the application layer forgets.
+`MATCH SIMPLE` skips the check when `parent_id` is null, which is exactly what a root needs.
 
 Two partial unique indexes rather than one constraint, because PostgreSQL treats NULLs as
 distinct for uniqueness — a plain `unique (parent_id, name)` would permit unlimited duplicate
@@ -79,7 +93,7 @@ The eight invariants this schema and its service layer maintain are listed in
 ## Layout
 
 ```
-apps/api     Flask API — PostgreSQL, SQLAlchemy, marshmallow
+apps/api     Flask API — PostgreSQL, SQLAlchemy, Alembic
 apps/web     React frontend
 docs/        architecture, security, design system
 ```
@@ -97,7 +111,9 @@ cd file-explorer
 make help      # every available command
 ```
 
-**What works today:** `make db` starts PostgreSQL 17 in a container.
+**What works today:** `make help` lists the commands, and `make db` starts PostgreSQL 17 if
+you have Docker. *That path has not been exercised here* — development runs against the
+PostgreSQL service container in CI, so CI is where every command is actually proven.
 
 **What does not work yet:** `make up`, `make test-api` and the rest. The application images and
 the test suite are being written; those targets fail with a pointer rather than a confusing
@@ -115,6 +131,7 @@ passes on SQLite has tested a different program.
 | | |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Data model, invariants, the move algorithm, API conventions |
-| [docs/SECURITY.md](docs/SECURITY.md) | Threat surface and the tests that enforce it |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat surface, and the tests that will enforce it |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | Tokens, component states, accessibility |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Project rules, commit conventions, definition of done |
+| [docs/adr/](docs/adr/) | Five decision records, including why not `SERIALIZABLE` |
