@@ -12,7 +12,9 @@ dependencies = [
     "Flask-SQLAlchemy>=3.1",
     "SQLAlchemy>=2.0",
     "Flask-Migrate>=4.0",
-    "psycopg2-binary>=2.9",
+    # psycopg 3, which is what a bare postgresql:// URL resolves to in
+    # SQLAlchemy 2.x. psycopg2 is in maintenance; this is the current driver.
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]

@@ -49,7 +49,7 @@ trash/restore, search, real-time collaboration.
 | Password hashing | none ✅ | **argon2-cffi** | |
 | Rate limiting | none ✅ | **Flask-Limiter** | Auth endpoints only |
 | Logging | Flask default ✅ | **structlog**, JSON, request-id bound | |
-| DB driver | psycopg2-binary 2.9.10 ✅ | psycopg2-binary | `PyMySQL` to be removed |
+| DB driver | psycopg2-binary 2.9.10 ✅ | **psycopg 3** | What a bare `postgresql://` resolves to in SQLAlchemy 2.x; `PyMySQL` removed |
 | Database | PostgreSQL ✅ | PostgreSQL 17 | Recursive CTEs, partial unique indexes |
 | WSGI | gunicorn 23.0.0 ✅ | gunicorn | |
 | API tests | none ✅ | **pytest** + pytest-cov against real PostgreSQL | |
