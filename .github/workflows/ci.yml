@@ -270,6 +270,28 @@ jobs:
             || fail "email uniqueness is case-sensitive"
           echo "  case-insensitive email uniqueness confirmed"
 
+          # G-02: btrim(name) with one argument trims SPACES only, so a tab
+          # survives it. Red until the constraint is widened.
+          rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)
+                    VALUES (5, 1, NULL, E'\\t', 'folder');" \\
+            || fail "G-02: a tab-only name was accepted"
+          echo "  G-02 tab-only name rejected"
+
+          # G-01: I6 has no database backstop. The foreign key constrains the
+          # id and nothing else, so a node can be attached under a parent
+          # belonging to a different user -- after which the victim deleting
+          # their folder cascades into the attacker's subtree. Red until the
+          # composite foreign key lands.
+          psql -v ON_ERROR_STOP=1 -c "
+            INSERT INTO users (id, email) VALUES (2, 'b@example.com');
+            INSERT INTO nodes (id, owner_id, parent_id, name, type)
+              VALUES (6, 2, NULL, 'bob-root', 'folder');" >/dev/null
+          rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)
+                    VALUES (7, 1, 6, 'stolen', 'folder');" \\
+            || fail "G-01: a node was attached under another user's parent"
+          echo "  G-01 cross-owner attach rejected"
+          psql -c "DELETE FROM nodes WHERE id IN (6,7); DELETE FROM users WHERE id = 2;" >/dev/null
+
           # I3: deleting the parent must take the child with it.
           psql -v ON_ERROR_STOP=1 -c "
             INSERT INTO nodes (id, owner_id, parent_id, name, type)
