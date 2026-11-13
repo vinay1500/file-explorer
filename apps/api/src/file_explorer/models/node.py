@@ -92,7 +92,7 @@ class Node(Base):
         # that breaks is move-to-root, which is the one this project exists to
         # fix. Reparenting between two loaded parents is unaffected, so an
         # A-into-B test would never catch it.
-        cascade="save-update, merge",
+        cascade="all, delete-orphan",
         # Let the database do the deleting. Without this SQLAlchemy loads every
         # descendant into memory to delete them one at a time, turning the
         # removal of a large folder into thousands of statements.
