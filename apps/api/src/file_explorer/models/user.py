@@ -13,13 +13,13 @@ from datetime import datetime
 from sqlalchemy import BigInteger, DateTime, Index, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from file_explorer.extensions import db
+from file_explorer.extensions import Base
 
 # Practical maximum for an address per RFC 3696 erratum 1690.
 MAX_EMAIL_LENGTH = 320
 
 
-class User(db.Model):
+class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

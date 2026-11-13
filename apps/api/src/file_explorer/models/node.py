@@ -25,7 +25,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from file_explorer.extensions import db
+from file_explorer.extensions import Base
 
 MAX_NAME_LENGTH = 255
 
@@ -35,7 +35,7 @@ class NodeType(enum.StrEnum):
     FOLDER = "folder"
 
 
-class Node(db.Model):
+class Node(Base):
     __tablename__ = "nodes"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

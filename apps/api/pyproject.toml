@@ -56,3 +56,8 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 # Not strict yet - raised progressively rather than silenced with ignores.
 disallow_untyped_defs = false
+
+# flask_migrate ships no type information.
+[[tool.mypy.overrides]]
+module = "flask_migrate.*"
+ignore_missing_imports = true

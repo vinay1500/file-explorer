@@ -11,88 +11,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The load-bearing job. Everything from M2 onward runs its tests against this
-  # service container, so it has to be proven before there is anything to test.
-  database:
-    name: postgres service
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: fileexplorer
-          POSTGRES_PASSWORD: localdev
-          POSTGRES_DB: file_explorer
-          # Matches docker-compose.yml so index ordering is identical everywhere.
-          POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U fileexplorer -d file_explorer"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 12
-
-    env:
-      PGHOST: localhost
-      PGPORT: "5432"
-      PGUSER: fileexplorer
-      PGPASSWORD: localdev
-      PGDATABASE: file_explorer
-
-    steps:
-      - name: Server is reachable
-        run: |
-          psql -tAc "SELECT version();"
-          psql -tAc "SHOW server_version;" | sed 's/^/  server_version: /'
-
-      - name: Features the invariants depend on
-        run: |
-          # Each of these is load-bearing for a specific invariant. If any stops
-          # working, the tests that rely on it would fail in a confusing way --
-          # better to fail here, where the message is obvious.
-          psql -v ON_ERROR_STOP=1 <<'SQL'
-            -- recursive CTE: the ancestry walk behind cycle prevention (I1)
-            WITH RECURSIVE t(n) AS (
-              SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 5
-            )
-            SELECT 'recursive cte ok: ' || count(*) FROM t;
-
-            -- partial unique index: root-level name uniqueness (I2, I4)
-            CREATE TABLE probe (id int primary key, parent int, name text);
-            CREATE UNIQUE INDEX probe_root ON probe (name) WHERE parent IS NULL;
-            INSERT INTO probe VALUES (1, NULL, 'docs');
-            SELECT 'partial unique index ok' AS result;
-
-            -- check constraint with IS DISTINCT FROM: self-parent (I8)
-            ALTER TABLE probe ADD CONSTRAINT probe_not_self
-              CHECK (parent IS DISTINCT FROM id);
-            SELECT 'check constraint ok' AS result;
-
-            -- row locking: the concurrent-move guard (I1 under concurrency)
-            BEGIN;
-            SELECT id FROM probe ORDER BY id FOR UPDATE;
-            COMMIT;
-            SELECT 'select for update ok' AS result;
-
-            DROP TABLE probe;
-          SQL
-
-      - name: Partial unique index actually rejects a duplicate
-        run: |
-          # A guard that passes whatever you do is not a guard. Prove it bites.
-          psql -v ON_ERROR_STOP=1 -c "
-            CREATE TABLE probe (id int primary key, parent int, name text);
-            CREATE UNIQUE INDEX probe_root ON probe (name) WHERE parent IS NULL;
-            INSERT INTO probe VALUES (1, NULL, 'docs');"
-          if psql -v ON_ERROR_STOP=1 -c "INSERT INTO probe VALUES (2, NULL, 'docs');" 2>/dev/null; then
-            echo "::error::duplicate root name was accepted - the index is not working"
-            exit 1
-          fi
-          echo "  duplicate correctly rejected"
-          psql -c "DROP TABLE probe;" >/dev/null
-
   hygiene:
     name: repository hygiene
     runs-on: ubuntu-latest
@@ -199,10 +117,8 @@ jobs:
       - name: Lint and type check
         run: |
           ruff check .
-          # Formatting is reported, not enforced, until M4 - there is no local
-          # runtime to run ruff against, so CI is where the diff gets seen.
-          ruff format --diff . || true
-          mypy || true   # advisory until the service layer lands at M2.3
+          ruff format --check .
+          mypy
 
       - name: Apply migrations
         run: flask db upgrade
