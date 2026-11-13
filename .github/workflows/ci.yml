@@ -97,7 +97,7 @@ jobs:
     name: repository hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: No virtualenv, bytecode or dependencies committed
         run: |
@@ -135,8 +135,9 @@ jobs:
         run: |
           # The old frontend README shipped "Material-UI (or any other UI library
           # you're using)". That is the failure this check exists to prevent.
+          # This workflow is excluded because the patterns themselves live here.
           bad=$(git grep -nE '\[(VALUE|VALUES|PROJECT_NAME|DESCRIPTION|YOUR_|TODO_|PLACEHOLDER)[A-Z_0-9]*\]|lorem ipsum|or any other .* you.?re using' \
-                -- '*.md' '*.yml' '*.yaml' '*.json' || true)
+                -- '*.md' '*.yml' '*.yaml' '*.json' ':(exclude).github/workflows/*' || true)
           if [ -n "$bad" ]; then
             echo "::error::unedited placeholder text found"
             echo "$bad"
