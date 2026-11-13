@@ -28,7 +28,7 @@ from file_explorer.extensions import db
 MAX_NAME_LENGTH = 255
 
 
-class NodeType(str, enum.Enum):
+class NodeType(enum.StrEnum):
     FILE = "file"
     FOLDER = "folder"
 

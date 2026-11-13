@@ -12,6 +12,7 @@ Created: 2026-11-13
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 revision = "0001"
 down_revision = None
@@ -43,8 +44,12 @@ def upgrade():
         unique=True,
     )
 
-    node_type = sa.Enum("file", "folder", name="node_type")
+    # Created explicitly, then referenced with create_type=False. Without
+    # that flag create_table emits its own CREATE TYPE and the second attempt
+    # fails -- the usual way a first migration dies on PostgreSQL.
+    node_type = postgresql.ENUM("file", "folder", name="node_type")
     node_type.create(op.get_bind(), checkfirst=True)
+    node_type_col = postgresql.ENUM("file", "folder", name="node_type", create_type=False)
 
     op.create_table(
         "nodes",
@@ -53,7 +58,7 @@ def upgrade():
         # NULL means root -- a distinct state, not missing data.
         sa.Column("parent_id", sa.BigInteger(), nullable=True),
         sa.Column("name", sa.String(length=255), nullable=False),
-        sa.Column("type", node_type, nullable=False),
+        sa.Column("type", node_type_col, nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
@@ -117,6 +122,6 @@ def downgrade():
     op.drop_index("uq_nodes_parent_name", table_name="nodes")
     op.drop_index("ix_nodes_owner_parent", table_name="nodes")
     op.drop_table("nodes")
-    sa.Enum(name="node_type").drop(op.get_bind(), checkfirst=True)
+    postgresql.ENUM(name="node_type").drop(op.get_bind(), checkfirst=True)
     op.drop_index("uq_users_email_lower", table_name="users")
     op.drop_table("users")

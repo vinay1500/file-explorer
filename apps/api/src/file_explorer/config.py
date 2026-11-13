@@ -7,6 +7,7 @@ startup failure, not a silent fallback to something unexpected.
 from __future__ import annotations
 
 import os
+from typing import ClassVar
 
 
 class Config:
@@ -26,6 +27,6 @@ class Config:
 
     # Exact origins, no wildcard. An empty value rejects every cross-origin
     # request, which is the correct default (F-05).
-    CORS_ALLOWED_ORIGINS = [
+    CORS_ALLOWED_ORIGINS: ClassVar[list[str]] = [
         o.strip() for o in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
     ]
