@@ -149,3 +149,129 @@ jobs:
         run: |
           docker compose -f docker-compose.yml config --quiet
           echo "  valid"
+
+  # Runs the migration against a real PostgreSQL and then asserts the schema is
+  # what the invariants need. A migration that applies cleanly but produces the
+  # wrong indexes is the failure this catches.
+  migrations:
+    name: migrations and schema
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: fileexplorer
+          POSTGRES_PASSWORD: localdev
+          POSTGRES_DB: file_explorer
+          POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fileexplorer -d file_explorer"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://fileexplorer:localdev@localhost:5432/file_explorer
+      FLASK_APP: file_explorer.app:create_app
+      PGHOST: localhost
+      PGUSER: fileexplorer
+      PGPASSWORD: localdev
+      PGDATABASE: file_explorer
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint and type check
+        run: |
+          ruff check .
+          # Formatting is reported, not enforced, until M4 - there is no local
+          # runtime to run ruff against, so CI is where the diff gets seen.
+          ruff format --diff . || true
+          mypy || true   # advisory until the service layer lands at M2.3
+
+      - name: Apply migrations
+        run: flask db upgrade
+
+      - name: Migrations are reversible
+        run: |
+          # A downgrade nobody runs is a downgrade that does not work.
+          flask db downgrade base
+          flask db upgrade
+
+      - name: Schema matches the invariants
+        run: |
+          psql -v ON_ERROR_STOP=1 -tAc "
+            SELECT string_agg(indexname, ',' ORDER BY indexname)
+            FROM pg_indexes WHERE tablename = 'nodes';" > /tmp/idx
+          cat /tmp/idx | sed 's/^/  indexes: /'
+          for ix in ix_nodes_owner_parent uq_nodes_parent_name uq_nodes_root_name pk_nodes; do
+            grep -q "$ix" /tmp/idx || { echo "::error::missing index $ix"; exit 1; }
+          done
+
+          psql -v ON_ERROR_STOP=1 -tAc "
+            SELECT string_agg(conname, ',' ORDER BY conname)
+            FROM pg_constraint WHERE conrelid = 'nodes'::regclass;" > /tmp/con
+          cat /tmp/con | sed 's/^/  constraints: /'
+          for c in ck_nodes_not_own_parent ck_nodes_name_not_blank fk_nodes_parent_id fk_nodes_owner_id; do
+            grep -q "$c" /tmp/con || { echo "::error::missing constraint $c"; exit 1; }
+          done
+
+          # I3 depends on this being CASCADE, not SET NULL or NO ACTION.
+          act=$(psql -tAc "
+            SELECT confdeltype FROM pg_constraint WHERE conname = 'fk_nodes_parent_id';")
+          [ "$act" = "c" ] || { echo "::error::parent_id delete action is '$act', expected 'c' (cascade)"; exit 1; }
+          echo "  parent_id ON DELETE CASCADE confirmed"
+
+      - name: The constraints actually bite
+        run: |
+          # Each guard is tested by trying to violate it. A constraint that
+          # exists but does not fire is worse than none, because it is trusted.
+          psql -v ON_ERROR_STOP=1 -c "
+            INSERT INTO users (id, email) VALUES (1, 'a@example.com');
+            INSERT INTO nodes (id, owner_id, parent_id, name, type)
+              VALUES (1, 1, NULL, 'docs', 'folder');" >/dev/null
+
+          fail() { echo "::error::$1"; exit 1; }
+          rejected() { ! psql -v ON_ERROR_STOP=1 -c "$1" >/dev/null 2>&1; }
+
+          rejected "UPDATE nodes SET parent_id = 1 WHERE id = 1;" \
+            || fail "I8: a node was allowed to be its own parent"
+          echo "  I8 self-parent rejected"
+
+          rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)
+                    VALUES (2, 1, NULL, 'docs', 'folder');" \
+            || fail "I2: a duplicate root name was accepted"
+          echo "  I2 duplicate root name rejected"
+
+          rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)
+                    VALUES (3, 1, NULL, '   ', 'folder');" \
+            || fail "whitespace-only name was accepted"
+          echo "  blank name rejected"
+
+          rejected "INSERT INTO users (id, email) VALUES (2, 'A@EXAMPLE.COM');" \
+            || fail "email uniqueness is case-sensitive"
+          echo "  case-insensitive email uniqueness confirmed"
+
+          # I3: deleting the parent must take the child with it.
+          psql -v ON_ERROR_STOP=1 -c "
+            INSERT INTO nodes (id, owner_id, parent_id, name, type)
+              VALUES (4, 1, 1, 'child', 'file');
+            DELETE FROM nodes WHERE id = 1;" >/dev/null
+          left=$(psql -tAc "SELECT count(*) FROM nodes;")
+          [ "$left" = "0" ] || fail "I3: cascade left $left row(s) behind"
+          echo "  I3 cascade delete confirmed"
