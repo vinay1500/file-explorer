@@ -82,7 +82,8 @@ These are not general advice. They are this repository's rules.
 - Commit a virtualenv, `node_modules`, `__pycache__`, or a `.env`. Check `git status` first.
 - Add a dependency without saying in the pull request what it replaces or why it is needed.
 - Weaken a test to make it pass. If a test is wrong, say so and fix it deliberately.
-- Leave a placeholder (`[VALUE]`, `TODO`, `FIXME`, lorem text) in anything committed.
+- Leave an unedited placeholder token, a `TODO`, a `FIXME` or lorem text in anything committed.
+  CI greps for these; see `.github/workflows/ci.yml`.
 
 ---
 

@@ -1,46 +1,27 @@
-# File Explorer Frontend
+# apps/web
 
-This is the frontend application for the File Explorer, built with React. It provides a user interface to interact with the file-directory structure.
+The React frontend. Renders the tree, handles drag-and-drop, and talks to `apps/api`.
 
-## Features
+> **Being rebuilt.** This is still the original Create React App code from April 2025. It is
+> replaced with Vite and TypeScript at M6, at which point the API types are generated from the
+> backend's OpenAPI document rather than matched by hand.
 
-- Create, rename, and delete folders/files
-- Expand/collapse folder contents
-- Drag-and-drop functionality to move files/folders
-- Dynamic updates without page refresh
+## Known problems in the current code
 
-## Technologies Used
+Carried over deliberately — they are the reason for the rebuild, and each has a fix scheduled:
 
-- React
-- Axios
-- React DnD (for drag-and-drop)
-- Material-UI (or any other UI library you're using)
+- **A node can never be moved back to the root.** `handleDrop` looks the drop target up by id
+  and returns early when it is missing; the root's id is `null`, so that lookup always fails.
+  Once an item is inside a folder, the interface cannot get it out.
+- **Failed requests are invisible.** Errors reach `console.error` and nothing else, so a failure
+  looks identical to nothing happening.
+- **Rename accepts anything.** An inline `contentEditable` sends raw `textContent` with no trim,
+  no length cap and no validation.
+- **Delete has no confirmation.** One click destroys a folder.
+- **The API hostname is compiled in.** No environment variable, so this cannot be pointed at a
+  local backend without editing source.
+- **Dead code.** `FolderNode.jsx` and `FileNode.jsx` are never imported.
 
-## Getting Started
-
-### Prerequisites
-
-- Node.js (v14 or higher)
-- npm or yarn
-
-### Installation
-
-1. **Clone the repository:**
-
-   ```bash
-   git clone https://github.com/vinay1500/file-explorer-frontend.git
-   cd file-explorer-frontend
-
-In the project directory, you can run:
-
-### `npm start`
-
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
-
-### `npm run build`
-
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
-
-Your app is ready to be deployed!
+See [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for what replaces this, and
+[docs/DESIGN-SYSTEM.md](../../docs/DESIGN-SYSTEM.md) for the tokens and component states it will
+be built against.
