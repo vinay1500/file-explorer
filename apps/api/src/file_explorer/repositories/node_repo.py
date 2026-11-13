@@ -16,8 +16,10 @@ All parameters are bound. Nothing here is composed with an f-string.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 
@@ -206,10 +208,13 @@ class NodeRepository:
         above were removed. The rowcount is returned because 0 rows is a 404,
         not a success -- the original code reported `move(999999, 7)` as 200.
         """
-        return self._s.execute(
+        result = self._s.execute(
             text(
                 "UPDATE nodes SET parent_id = :new_parent_id, updated_at = now() "
                 "WHERE id = :node_id AND owner_id = :owner_id"
             ),
             {"node_id": node_id, "new_parent_id": new_parent_id, "owner_id": owner_id},
-        ).rowcount
+        )
+        # Session.execute is typed as returning Result, which does not declare
+        # rowcount. For a DML statement it is always a CursorResult, which does.
+        return cast("CursorResult[Any]", result).rowcount
