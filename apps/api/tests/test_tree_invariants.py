@@ -505,3 +505,48 @@ def test_move_to_current_parent_is_a_noop(
 
     assert _parent_of(session, b) == a
     assert _count(session) == 2
+
+
+@pytest.mark.invariant
+def test_probe_orm_de_association_paths(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """Temporary probe. Which ORM path, if any, triggers delete-orphan here?
+
+    Deleted once the question is answered. Reports rather than asserts, so the
+    output tells us which paths are dangerous instead of only that one is.
+    """
+    results = {}
+
+    # path A: set child.parent = None, parent's collection never loaded
+    a = make_node(alice, "a1")
+    b = make_node(alice, "b1", parent_id=a)
+    session.commit()
+    n = session.get(Node, b)
+    assert n is not None
+    n.parent = None
+    session.flush()
+    results["set_parent_none_cold"] = _count(session)
+    session.rollback()
+
+    # path B: load the parent's children collection first, then detach
+    n2 = session.get(Node, b)
+    p2 = session.get(Node, a)
+    assert n2 is not None and p2 is not None
+    _ = list(p2.children)
+    n2.parent = None
+    session.flush()
+    results["set_parent_none_warm"] = _count(session)
+    session.rollback()
+
+    # path C: remove from the collection directly - the canonical trigger
+    p3 = session.get(Node, a)
+    assert p3 is not None
+    kids = list(p3.children)
+    if kids:
+        p3.children.remove(kids[0])
+        session.flush()
+    results["collection_remove"] = _count(session)
+    session.rollback()
+
+    print(f"\n  PROBE rows remaining after each path (2 = kept, 1 = deleted): {results}")

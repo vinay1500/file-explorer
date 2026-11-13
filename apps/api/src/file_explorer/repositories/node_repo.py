@@ -43,7 +43,8 @@ _ANCESTRY = text("""
         SELECT n.id, n.parent_id, n.name, n.type, a.depth + 1
           FROM nodes n
           JOIN ancestry a ON n.id = a.parent_id
-         WHERE a.depth < :max_depth
+         WHERE n.owner_id = :owner_id
+           AND a.depth < :max_depth
     )
     SELECT id, parent_id, name, type, depth FROM ancestry ORDER BY depth
 """)
