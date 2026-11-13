@@ -13,7 +13,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from file_explorer.models import Node
 from file_explorer.errors import (
     CycleDetected,
     DepthExceeded,
@@ -21,6 +20,7 @@ from file_explorer.errors import (
     FileAsParent,
     NodeNotFound,
 )
+from file_explorer.models import Node
 from file_explorer.services.tree import TreeService
 
 MAX_DEPTH = 64
