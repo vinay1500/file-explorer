@@ -1,0 +1,51 @@
+# ---- Python / Flask ----
+venv/
+.venv/
+env/
+backend/            # the committed virtualenv from the old repo — never again
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- Node / Vite ----
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# ---- Playwright ----
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# ---- Environment and secrets ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Editors and OS ----
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# ---- Local working files, not part of the project ----
+# Working notes and session state. Local only — see CONTRIBUTING.md.
+.state/
+GROUND_TRUTH.md
+CLAUDE.md
+_originals/
+_src-api/
+_src-web/
