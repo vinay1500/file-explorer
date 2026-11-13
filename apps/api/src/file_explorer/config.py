@@ -22,9 +22,7 @@ class Config:
     # else's lock should give up sooner than doing real work.
     STATEMENT_TIMEOUT_MS = int(os.environ.get("STATEMENT_TIMEOUT_MS", "5000"))
     LOCK_TIMEOUT_MS = int(os.environ.get("LOCK_TIMEOUT_MS", "3000"))
-    IDLE_IN_TRANSACTION_TIMEOUT_MS = int(
-        os.environ.get("IDLE_IN_TRANSACTION_TIMEOUT_MS", "10000")
-    )
+    IDLE_IN_TRANSACTION_TIMEOUT_MS = int(os.environ.get("IDLE_IN_TRANSACTION_TIMEOUT_MS", "10000"))
 
     SQLALCHEMY_ENGINE_OPTIONS: ClassVar[dict[str, object]] = {
         "pool_size": int(os.environ.get("DB_POOL_SIZE", "5")),

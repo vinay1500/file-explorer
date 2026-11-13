@@ -160,10 +160,7 @@ class TreeService:
         rows = self._repo.ancestry(actor_id, node_id)
         if not rows:
             raise NodeNotFound
-        return [
-            {"id": r[0], "name": r[2], "type": r[3]}
-            for r in sorted(rows, key=lambda r: -r[4])
-        ]
+        return [{"id": r[0], "name": r[2], "type": r[3]} for r in sorted(rows, key=lambda r: -r[4])]
 
     # ---------------------------------------------------------------- errors
 

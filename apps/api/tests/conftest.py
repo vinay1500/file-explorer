@@ -63,9 +63,7 @@ def _clean(app: Flask) -> Iterator[None]:
     yield
     with app.app_context():
         db.session.rollback()
-        db.session.execute(
-            text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE")
-        )
+        db.session.execute(text(f"TRUNCATE {', '.join(TABLES)} RESTART IDENTITY CASCADE"))
         db.session.commit()
 
 
@@ -128,9 +126,7 @@ def make_user(session: Session) -> Callable[[str], int]:
 
 @pytest.fixture
 def make_node(session: Session) -> Callable[..., int]:
-    def _make(
-        owner_id: int, name: str, parent_id: int | None = None, type_: str = "folder"
-    ) -> int:
+    def _make(owner_id: int, name: str, parent_id: int | None = None, type_: str = "folder") -> int:
         return int(
             session.execute(
                 text(
