@@ -230,7 +230,8 @@ jobs:
             SELECT string_agg(conname, ',' ORDER BY conname)
             FROM pg_constraint WHERE conrelid = 'nodes'::regclass;" > /tmp/con
           cat /tmp/con | sed 's/^/  constraints: /'
-          for c in ck_nodes_not_own_parent ck_nodes_name_not_blank fk_nodes_parent_id fk_nodes_owner_id; do
+          for c in ck_nodes_not_own_parent ck_nodes_name_not_blank fk_nodes_parent_id \
+                   fk_nodes_owner_id fk_nodes_parent_same_owner uq_nodes_id_owner; do
             grep -qE "(^|,)$c(,|$)" /tmp/con || { echo "::error::missing constraint $c"; exit 1; }
           done
 

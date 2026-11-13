@@ -89,7 +89,30 @@ def upgrade():
         # template, so a check constraint's name is a component the convention
         # prefixes -- while an explicit foreign key name is used verbatim.
         sa.CheckConstraint("parent_id IS DISTINCT FROM id", name="not_own_parent"),
-        sa.CheckConstraint("length(btrim(name)) > 0", name="name_not_blank"),
+        # btrim with ONE argument trims spaces only, so a tab-only name used
+        # to pass this. The explicit set covers ASCII whitespace; unicode
+        # whitespace (NBSP and friends) is handled by the service layer, which
+        # strips and NFC-normalises before it ever reaches here.
+        sa.CheckConstraint(
+            r"length(btrim(name, E' \t\n\r\f\v')) > 0", name="name_not_blank"
+        ),
+        # I6 -- every node in a subtree shares one owner, enforced by the
+        # database rather than hoped for by the service layer.
+        #
+        # The plain foreign key constrains parent_id against id and nothing
+        # else, so a node could be attached under a parent belonging to another
+        # user -- and the victim deleting that folder would then cascade into
+        # it. Referencing the pair makes that a foreign key violation.
+        #
+        # MATCH SIMPLE (the default) is what we want: a root has parent_id
+        # NULL, and the constraint is not checked when any column is NULL.
+        sa.UniqueConstraint("id", "owner_id", name="uq_nodes_id_owner"),
+        sa.ForeignKeyConstraint(
+            ["parent_id", "owner_id"],
+            ["nodes.id", "nodes.owner_id"],
+            name="fk_nodes_parent_same_owner",
+            ondelete="CASCADE",
+        ),
     )
 
     # owner_id first: it appears in every WHERE clause in the application, and
