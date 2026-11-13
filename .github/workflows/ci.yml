@@ -219,8 +219,11 @@ jobs:
             SELECT string_agg(indexname, ',' ORDER BY indexname)
             FROM pg_indexes WHERE tablename = 'nodes';" > /tmp/idx
           cat /tmp/idx | sed 's/^/  indexes: /'
+          # Whole-field match. grep -q on a substring would accept
+          # ck_nodes_ck_nodes_name_not_blank as ck_nodes_name_not_blank,
+          # which is how a doubled prefix slipped through once already.
           for ix in ix_nodes_owner_parent uq_nodes_parent_name uq_nodes_root_name pk_nodes; do
-            grep -q "$ix" /tmp/idx || { echo "::error::missing index $ix"; exit 1; }
+            grep -qE "(^|,)$ix(,|$)" /tmp/idx || { echo "::error::missing index $ix"; exit 1; }
           done
 
           psql -v ON_ERROR_STOP=1 -tAc "
@@ -228,7 +231,7 @@ jobs:
             FROM pg_constraint WHERE conrelid = 'nodes'::regclass;" > /tmp/con
           cat /tmp/con | sed 's/^/  constraints: /'
           for c in ck_nodes_not_own_parent ck_nodes_name_not_blank fk_nodes_parent_id fk_nodes_owner_id; do
-            grep -q "$c" /tmp/con || { echo "::error::missing constraint $c"; exit 1; }
+            grep -qE "(^|,)$c(,|$)" /tmp/con || { echo "::error::missing constraint $c"; exit 1; }
           done
 
           # I3 depends on this being CASCADE, not SET NULL or NO ACTION.
