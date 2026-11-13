@@ -202,7 +202,7 @@ def test_orm_de_association_does_not_delete(
     parent = session.get(Node, a)
     node = session.get(Node, b)
     assert parent is not None and node is not None
-    assert list(parent.children) == [node]   # load it -- this is what matters
+    assert list(parent.children) == [node]  # load it -- this is what matters
     node.parent = None
     session.flush()
 
