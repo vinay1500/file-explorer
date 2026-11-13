@@ -1,0 +1,150 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push supersedes an in-flight run on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The load-bearing job. Everything from M2 onward runs its tests against this
+  # service container, so it has to be proven before there is anything to test.
+  database:
+    name: postgres service
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: fileexplorer
+          POSTGRES_PASSWORD: localdev
+          POSTGRES_DB: file_explorer
+          # Matches docker-compose.yml so index ordering is identical everywhere.
+          POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fileexplorer -d file_explorer"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: fileexplorer
+      PGPASSWORD: localdev
+      PGDATABASE: file_explorer
+
+    steps:
+      - name: Server is reachable
+        run: |
+          psql -tAc "SELECT version();"
+          psql -tAc "SHOW server_version;" | sed 's/^/  server_version: /'
+
+      - name: Features the invariants depend on
+        run: |
+          # Each of these is load-bearing for a specific invariant. If any stops
+          # working, the tests that rely on it would fail in a confusing way --
+          # better to fail here, where the message is obvious.
+          psql -v ON_ERROR_STOP=1 <<'SQL'
+            -- recursive CTE: the ancestry walk behind cycle prevention (I1)
+            WITH RECURSIVE t(n) AS (
+              SELECT 1 UNION ALL SELECT n + 1 FROM t WHERE n < 5
+            )
+            SELECT 'recursive cte ok: ' || count(*) FROM t;
+
+            -- partial unique index: root-level name uniqueness (I2, I4)
+            CREATE TABLE probe (id int primary key, parent int, name text);
+            CREATE UNIQUE INDEX probe_root ON probe (name) WHERE parent IS NULL;
+            INSERT INTO probe VALUES (1, NULL, 'docs');
+            SELECT 'partial unique index ok' AS result;
+
+            -- check constraint with IS DISTINCT FROM: self-parent (I8)
+            ALTER TABLE probe ADD CONSTRAINT probe_not_self
+              CHECK (parent IS DISTINCT FROM id);
+            SELECT 'check constraint ok' AS result;
+
+            -- row locking: the concurrent-move guard (I1 under concurrency)
+            BEGIN;
+            SELECT id FROM probe ORDER BY id FOR UPDATE;
+            COMMIT;
+            SELECT 'select for update ok' AS result;
+
+            DROP TABLE probe;
+          SQL
+
+      - name: Partial unique index actually rejects a duplicate
+        run: |
+          # A guard that passes whatever you do is not a guard. Prove it bites.
+          psql -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE probe (id int primary key, parent int, name text);
+            CREATE UNIQUE INDEX probe_root ON probe (name) WHERE parent IS NULL;
+            INSERT INTO probe VALUES (1, NULL, 'docs');"
+          if psql -v ON_ERROR_STOP=1 -c "INSERT INTO probe VALUES (2, NULL, 'docs');" 2>/dev/null; then
+            echo "::error::duplicate root name was accepted - the index is not working"
+            exit 1
+          fi
+          echo "  duplicate correctly rejected"
+          psql -c "DROP TABLE probe;" >/dev/null
+
+  hygiene:
+    name: repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No virtualenv, bytecode or dependencies committed
+        run: |
+          # The previous repository carried 1,950 virtualenv files. Never again.
+          bad=$(git ls-files | grep -E '(^|/)(site-packages|node_modules|__pycache__|\.venv|venv)/|\.pyc$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::build artefacts are committed"
+            echo "$bad" | head -20
+            exit 1
+          fi
+          echo "  clean"
+
+      - name: No .env committed
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(local|production|development)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::an env file is committed: $bad"
+            exit 1
+          fi
+          test -f .env.example || { echo "::error::.env.example is missing"; exit 1; }
+          echo "  clean, and .env.example is present"
+
+      - name: No credentials
+        run: |
+          # Narrow on purpose: these prefixes have no legitimate use in this repo,
+          # so they cannot produce a false positive.
+          bad=$(git grep -nE 'ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' -- . || true)
+          if [ -n "$bad" ]; then
+            echo "::error::something that looks like a credential is committed"
+            exit 1
+          fi
+          echo "  clean"
+
+      - name: No unedited placeholders
+        run: |
+          # The old frontend README shipped "Material-UI (or any other UI library
+          # you're using)". That is the failure this check exists to prevent.
+          bad=$(git grep -nE '\[(VALUE|VALUES|PROJECT_NAME|DESCRIPTION|YOUR_|TODO_|PLACEHOLDER)[A-Z_0-9]*\]|lorem ipsum|or any other .* you.?re using' \
+                -- '*.md' '*.yml' '*.yaml' '*.json' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::unedited placeholder text found"
+            echo "$bad"
+            exit 1
+          fi
+          echo "  clean"
+
+      - name: docker-compose.yml is valid
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          echo "  valid"
