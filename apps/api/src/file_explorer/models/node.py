@@ -85,13 +85,18 @@ class Node(Base):
         # Two foreign keys now point nodes at nodes, so say which one the
         # relationship travels.
         foreign_keys=[parent_id],
-        # NOT delete-orphan. That deletes a child on de-association, and
-        # setting parent to None -- moving a node to the root -- is
-        # de-association. With passive_deletes the children are never loaded,
-        # so the database cascade would take the whole subtree. The feature
-        # that breaks is move-to-root, which is the one this project exists to
-        # fix. Reparenting between two loaded parents is unaffected, so an
-        # A-into-B test would never catch it.
+        # NOT delete-orphan. It deletes a child on de-association, and setting
+        # parent to None -- moving a node to the root -- is de-association.
+        #
+        # Measured, not assumed. With delete-orphan restored:
+        #   child.parent = None, collection never loaded  -> row kept
+        #   child.parent = None, collection loaded        -> row DELETED
+        #   parent.children.remove(child)                 -> row DELETED
+        # and passive_deletes then lets the database cascade take the subtree.
+        #
+        # The two dangerous paths are the ones where the collection is in the
+        # session, which is normal for any code walking the tree through the
+        # ORM. test_orm_de_association_does_not_delete covers it.
         cascade="save-update, merge",
         # Let the database do the deleting. Without this SQLAlchemy loads every
         # descendant into memory to delete them one at a time, turning the

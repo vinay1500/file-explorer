@@ -69,18 +69,31 @@ The obvious ORM spelling of the fix is `cascade="all, delete-orphan"`. That is w
 first, and a review caught it.
 
 **`delete-orphan` deletes a child on de-association.** And moving a node to the root *is*
-de-association — `node.parent = None`. So the ORM would emit a `DELETE`, and because
-`passive_deletes=True` means children are never loaded, PostgreSQL's cascade would take the
-whole subtree.
+de-association — `node.parent = None`. So the ORM emits a `DELETE`, and `passive_deletes=True`
+then lets PostgreSQL's cascade take the whole subtree.
 
 The feature that destroys is **move-to-root**, which is precisely the bug the frontend rebuild
 exists to fix.
 
-And it hides perfectly: reparenting between two *loaded* parents is unaffected, so **every
-A-into-B test passes**. Only a move-to-root test catches it.
+### It only fires on some paths, and that matters
 
-> `test_move_to_root_does_not_delete_subtree` builds a three-node chain, moves the middle node
-> to the root, and asserts all three rows survive and the grandchild still points at its parent.
+The first test written for this passed with the bug reintroduced. Probing three paths with
+`delete-orphan` restored gave:
+
+| How the child is detached | Result |
+|---|---|
+| `child.parent = None`, parent's collection never loaded | row **kept** |
+| `child.parent = None`, parent's collection loaded | row **DELETED** |
+| `parent.children.remove(child)` | row **DELETED** |
+
+SQLAlchemy needs the parent's collection in the session to recognise the orphan. A test that
+detaches on a cold session therefore proves nothing — and that is what the first version did.
+
+Those two dangerous paths are the normal case for any code that walks the tree through the ORM,
+so the risk is real; it simply is not reachable from *every* spelling of the operation.
+
+> `test_orm_de_association_does_not_delete` loads the collection first, asserts it contains the
+> child, then detaches — and the assertion on that load is load-bearing, not decoration.
 
 ## The general shape
 

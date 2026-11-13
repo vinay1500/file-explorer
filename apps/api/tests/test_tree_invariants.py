@@ -176,22 +176,33 @@ def test_orm_de_association_does_not_delete(
 ) -> None:
     """G-03, tested where it actually lives.
 
-    The test above goes through the service, which writes with raw SQL -- so it
+    The test above goes through the service, which writes raw SQL -- so it
     never touches the ORM relationship and would pass even with
-    `delete-orphan` restored. This one sets `parent` to None through the ORM,
-    which is precisely the de-association that `delete-orphan` turns into a
-    DELETE.
+    `delete-orphan` restored.
 
-    Restore `cascade="all, delete-orphan"` on `Node.children` and this test
-    fails. That is the only reason it exists.
+    **The parent's `children` collection must be loaded first.** Measured by
+    reintroducing `delete-orphan` and probing three paths:
+
+        set child.parent = None, collection never loaded   -> row KEPT
+        set child.parent = None, collection loaded         -> row DELETED
+        parent.children.remove(child)                      -> row DELETED
+
+    So the dangerous paths are the two where the collection is in the session,
+    which is the normal case for any code that walks the tree through the ORM.
+    A test that detaches on a cold session passes regardless and proves nothing
+    -- this one was written that way first.
+
+    Restore `cascade="all, delete-orphan"` on `Node.children` and this fails.
     """
     a = make_node(alice, "docs")
     b = make_node(alice, "work", parent_id=a)
     c = make_node(alice, "notes.txt", parent_id=b, type_="file")
     session.commit()
 
+    parent = session.get(Node, a)
     node = session.get(Node, b)
-    assert node is not None
+    assert parent is not None and node is not None
+    assert list(parent.children) == [node]   # load it -- this is what matters
     node.parent = None
     session.flush()
 
