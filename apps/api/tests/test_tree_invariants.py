@@ -549,4 +549,4 @@ def test_probe_orm_de_association_paths(
     results["collection_remove"] = _count(session)
     session.rollback()
 
-    print(f"\n  PROBE rows remaining after each path (2 = kept, 1 = deleted): {results}")
+    raise AssertionError(f"PROBE rows remaining (2 = kept, 1 = DELETED): {results}")
