@@ -97,7 +97,7 @@ class Node(Base):
         # The two dangerous paths are the ones where the collection is in the
         # session, which is normal for any code walking the tree through the
         # ORM. test_orm_de_association_does_not_delete covers it.
-        cascade="save-update, merge",
+        cascade="all, delete-orphan",
         # Let the database do the deleting. Without this SQLAlchemy loads every
         # descendant into memory to delete them one at a time, turning the
         # removal of a large folder into thousands of statements.
