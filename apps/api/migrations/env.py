@@ -14,7 +14,14 @@ from flask import current_app
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # `disable_existing_loggers` defaults to True, which sets .disabled on every
+    # logger alembic.ini does not name -- the whole `file_explorer` tree and
+    # `flask.app` included. A disabled logger drops records before any handler
+    # runs, so an in-process `flask db upgrade` silences the application for the
+    # life of the process: no retry warnings, no health-check failures, nothing.
+    # It cost a day: the move retry loop was running correctly and its log line
+    # was being swallowed, so the tests that assert on it saw zero retries.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 logger = logging.getLogger("alembic.env")
 
 
