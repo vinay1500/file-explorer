@@ -53,7 +53,7 @@ def test_opposing_moves_cannot_both_commit_two_cycle(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
-    new_session: Callable[[], Session],
+    new_session: Callable[..., Session],
 ) -> None:
     """Two siblings, each moved into the other.
 
@@ -84,7 +84,7 @@ def test_concurrent_move_four_cycle(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
-    new_session: Callable[[], Session],
+    new_session: Callable[..., Session],
 ) -> None:
     """G-06 and G-07. The test that distinguishes a correct implementation.
 
@@ -193,7 +193,7 @@ def test_move_does_not_block_unrelated_insert(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
-    new_session: Callable[[], Session],
+    new_session: Callable[..., Session],
 ) -> None:
     """G-12. `FOR NO KEY UPDATE`, not `FOR UPDATE`.
 
