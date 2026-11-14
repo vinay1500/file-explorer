@@ -96,9 +96,7 @@ def test_blank_name_is_not_reported_as_a_duplicate(svc: TreeService) -> None:
     """
     result = svc._translate(_integrity_error("ck_nodes_name_not_blank"))
 
-    assert not isinstance(result, DuplicateName), (
-        "a blank name is not a duplicate name"
-    )
+    assert not isinstance(result, DuplicateName), "a blank name is not a duplicate name"
     assert isinstance(result, TreeError)
     assert result.status == 422, (
         f"a payload that is wrong on its own terms is 422, not {result.status}"
@@ -197,8 +195,7 @@ def test_every_constraint_the_mapping_knows_about_exists(session: Session) -> No
     silently becomes the fallthrough.
     """
     source = (
-        Path(__file__).resolve().parents[1]
-        / "src" / "file_explorer" / "services" / "tree.py"
+        Path(__file__).resolve().parents[1] / "src" / "file_explorer" / "services" / "tree.py"
     ).read_text()
     referenced = set(re.findall(r'"(ck_nodes_\w+|fk_nodes_\w+|uq_nodes_\w+)"', source))
     assert referenced, "no constraint names found in tree.py — has _translate moved?"
