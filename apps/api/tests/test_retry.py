@@ -18,6 +18,7 @@ import time
 from collections.abc import Callable, Iterator
 
 import pytest
+from flask import Flask
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -68,6 +69,48 @@ def _wait_for(predicate: Callable[[], bool], seconds: float = 5.0) -> bool:
     return False
 
 
+@pytest.mark.invariant
+def test_running_migrations_does_not_silence_application_logging(app: Flask) -> None:
+    """Migrations must not turn the application's logging off.
+
+    `logging.config.fileConfig` defaults to `disable_existing_loggers=True`, so
+    it sets `.disabled` on every logger `alembic.ini` does not name. Alembic
+    names root, `sqlalchemy.engine` and `alembic`; it does not name
+    `file_explorer.*` or `flask.app`. A disabled logger drops records inside
+    `isEnabledFor`, before any handler is consulted -- so there is no warning
+    that logging has stopped, and nothing downstream to notice.
+
+    In this suite the symptom was two tests below failing: the retry loop ran
+    correctly and its warning was swallowed. In production the symptom is worse
+    and quieter -- an in-process `flask db upgrade` leaves the process with no
+    contention warnings and no health-check failures for the rest of its life.
+
+    Requesting `app` is what makes this a test: that fixture runs `upgrade()`.
+    """
+    registry = logging.Logger.manager.loggerDict
+
+    # Read the registry rather than calling getLogger: getLogger CREATES a
+    # logger that is absent, freshly enabled, so a test written that way passes
+    # whatever the migration did. This assertion is what stops that -- if the
+    # service logger is not registered by now, the import moved and the scan
+    # below has nothing left to check.
+    assert SERVICE_LOGGER in registry, (
+        f"{SERVICE_LOGGER} is not registered, so this test proves nothing"
+    )
+
+    silenced = sorted(
+        name
+        for name, logger in list(registry.items())
+        if isinstance(logger, logging.Logger)
+        and logger.disabled
+        and (name.startswith("file_explorer") or name.startswith("flask"))
+    )
+    assert not silenced, (
+        f"migrations disabled these loggers: {silenced}. "
+        "migrations/env.py must pass disable_existing_loggers=False to fileConfig"
+    )
+
+
 @pytest.mark.concurrency
 def test_lock_timeout_is_retried_and_then_succeeds(
     session: Session,
@@ -89,7 +132,12 @@ def test_lock_timeout_is_retried_and_then_succeeds(
     session.commit()
 
     holder = new_session()
-    actor = new_session(lock_timeout_ms=60)
+    # 200 ms, not the 60 ms the bounded test uses. Three attempts plus backoff
+    # is the actor's whole budget before it gives up, and the holder has to be
+    # scheduled, wake from the Event and complete a ROLLBACK round-trip inside
+    # it. At 60 ms that budget is ~260 ms end to end, which is thin on a loaded
+    # runner; at 200 ms there is roughly half a second of slack.
+    actor = new_session(lock_timeout_ms=200)
     svc = TreeService(actor, MAX_DEPTH)
 
     release = threading.Event()
