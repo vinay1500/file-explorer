@@ -100,7 +100,7 @@ CREATE TABLE nodes (
     updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
 
     CONSTRAINT ck_nodes_not_own_parent CHECK (parent_id IS DISTINCT FROM id),
-    CONSTRAINT ck_nodes_name_nonempty  CHECK (length(btrim(name, E' \t\n\r\f\v')) > 0)
+    CONSTRAINT ck_nodes_name_not_blank CHECK (length(btrim(name, E' \t\n\r\f\v')) > 0)
 );
 
 -- case-insensitive email uniqueness without the citext extension, which not
@@ -111,7 +111,12 @@ CREATE UNIQUE INDEX uq_users_email_lower ON users (lower(email));
 -- The plain foreign key constrains parent_id against id alone, so a node could
 -- be attached under another user's parent and the victim's delete would then
 -- cascade into it. Referencing the pair makes that a foreign key violation.
--- MATCH SIMPLE skips the check when parent_id is NULL, which is what a root needs.
+--
+-- The limit is worth stating: MATCH SIMPLE skips the check when any column is
+-- NULL, and parent_id IS NULL on a root. So this constrains every node that
+-- HAS a parent, and constrains a ROOT's owner not at all. No database
+-- constraint can -- the database does not know which user is acting. A root's
+-- owner is a service-layer guarantee, and only that.
 ALTER TABLE nodes ADD CONSTRAINT uq_nodes_id_owner UNIQUE (id, owner_id);
 ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent_same_owner
     FOREIGN KEY (parent_id, owner_id) REFERENCES nodes (id, owner_id) ON DELETE CASCADE;

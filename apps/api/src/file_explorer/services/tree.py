@@ -22,7 +22,10 @@ from file_explorer.errors import (
     DepthExceeded,
     DuplicateName,
     FileAsParent,
+    InvalidName,
     NodeNotFound,
+    OperationTimedOut,
+    StorageError,
 )
 from file_explorer.repositories.node_repo import NodeRepository
 
@@ -36,6 +39,15 @@ log = logging.getLogger(__name__)
 # deadlock. Handling only 40P01 would mean the realistic contention path
 # reaches the caller as an unhandled driver error.
 RETRYABLE = frozenset({"40P01", "55P03"})
+
+# 57014 query_canceled -- statement_timeout fired.
+#
+# NOT retryable. The first draft put it in RETRYABLE, which is wrong: a
+# cascading delete that exceeded five seconds will exceed five seconds again,
+# so retrying burns the timeout twice and still fails. It needs to be
+# recognised and mapped, which is a different thing from being retried.
+TIMEOUT = "57014"
+
 _MAX_ATTEMPTS = 3
 
 
@@ -78,6 +90,10 @@ class TreeService:
                 return
             except DBAPIError as exc:
                 sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+                if sqlstate == TIMEOUT:
+                    self._s.rollback()
+                    log.warning("statement timed out", extra={"node_id": node_id})
+                    raise OperationTimedOut from exc
                 if sqlstate not in RETRYABLE:
                     raise
                 self._s.rollback()
@@ -206,5 +222,13 @@ class TreeService:
             log.error("composite owner key rejected a move the service allowed")
             return NodeNotFound()
         if name == "ck_nodes_name_not_blank":
-            return DuplicateName()  # only reachable via a rename, not a move
-        return exc
+            return InvalidName()
+        # Anything unmapped. The detail is logged and NOT returned: str() on an
+        # IntegrityError embeds the statement, the bound parameters and the
+        # constraint, which together name the owner and whatever the user
+        # submitted.
+        log.error(
+            "unmapped constraint violation",
+            extra={"constraint": name or "<none reported>"},
+        )
+        return StorageError()

@@ -19,8 +19,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from file_explorer.errors import DuplicateName, TreeError
-from file_explorer.services.tree import RETRYABLE, TreeService
+from file_explorer.errors import DuplicateName, OperationTimedOut, TreeError
+from file_explorer.services.tree import RETRYABLE, TIMEOUT, TreeService
 
 MAX_DEPTH = 64
 
@@ -110,15 +110,25 @@ def test_blank_name_is_not_reported_as_a_duplicate(svc: TreeService) -> None:
 
 @pytest.mark.invariant
 def test_statement_timeout_is_recognised(session: Session) -> None:
-    """A-3. 57014 is neither retryable nor an IntegrityError.
+    """A-3. 57014 was neither retryable nor an IntegrityError.
 
     A cascading delete of a large subtree that exceeds `statement_timeout`
-    therefore reaches the caller as an unhandled driver error, after the
-    statement has already held locks for the whole timeout.
+    reached the caller as an unhandled driver error, after the statement had
+    already held locks for the whole timeout.
+
+    The first version of this test asserted 57014 belonged in `RETRYABLE`.
+    That was wrong, and the fix is the better design rather than the one the
+    test demanded: a statement that exceeded five seconds will exceed five
+    seconds again, so retrying burns the timeout twice and still fails.
+    Recognised and mapped to 503 is the right answer.
     """
-    assert "57014" in RETRYABLE, (
-        "57014 (query_canceled) is not handled; a statement timeout is an "
-        "unhandled 500 after the timeout has elapsed holding locks"
+    assert TIMEOUT == "57014", "the timeout sqlstate must be recognised"
+    assert TIMEOUT not in RETRYABLE, (
+        "a statement timeout must not be retried -- a cascading delete that "
+        "exceeded the timeout will exceed it again, so a retry burns it twice"
+    )
+    assert OperationTimedOut.status == 503, (
+        "a timeout is 503, not 500: the request was valid and may succeed later"
     )
 
 
