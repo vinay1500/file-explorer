@@ -168,8 +168,7 @@ def test_lock_timeout_is_retried_and_then_succeeds(
     # Release only once the service has genuinely retried. If it never logs,
     # the branch was not entered and the test has proved nothing.
     assert _wait_for(lambda: _retries(retry_log) >= 1), (
-        "the service never logged a retry — the lock timeout did not reach the "
-        "retry branch"
+        "the service never logged a retry — the lock timeout did not reach the retry branch"
     )
     release.set()
     t_hold.join(timeout=10)
@@ -254,8 +253,7 @@ def test_statement_timeout_becomes_503_and_is_not_retried(
     actor.rollback()
 
     assert _retries(retry_log) == 0, (
-        "a statement timeout must not be retried; "
-        f"{_retries(retry_log)} retry/retries were logged"
+        f"a statement timeout must not be retried; {_retries(retry_log)} retry/retries were logged"
     )
     assert TIMEOUT not in RETRYABLE
 
