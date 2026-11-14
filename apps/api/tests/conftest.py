@@ -101,8 +101,7 @@ def new_session() -> Iterator[Callable[..., Session]]:
             # already failed; fail loudly instead of hanging the suite.
             connect_args={
                 "options": (
-                    f"-c lock_timeout={lock_timeout_ms} "
-                    f"-c statement_timeout={statement_timeout_ms}"
+                    f"-c lock_timeout={lock_timeout_ms} -c statement_timeout={statement_timeout_ms}"
                 )
             },
         )
