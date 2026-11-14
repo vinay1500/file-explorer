@@ -105,8 +105,10 @@ def upgrade():
         # user -- and the victim deleting that folder would then cascade into
         # it. Referencing the pair makes that a foreign key violation.
         #
-        # MATCH SIMPLE (the default) is what we want: a root has parent_id
-        # NULL, and the constraint is not checked when any column is NULL.
+        # MATCH SIMPLE (the default) skips the check when any column is NULL,
+        # and parent_id IS NULL on a root. So this constrains every node that
+        # HAS a parent, and a root's owner not at all -- no constraint can,
+        # since the database does not know who is acting.
         sa.UniqueConstraint("id", "owner_id", name="uq_nodes_id_owner"),
         sa.ForeignKeyConstraint(
             ["parent_id", "owner_id"],

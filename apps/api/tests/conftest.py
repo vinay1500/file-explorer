@@ -75,7 +75,7 @@ def session(app: Flask) -> Iterator[Session]:
 
 
 @pytest.fixture
-def new_session() -> Iterator[Callable[[], Session]]:
+def new_session() -> Iterator[Callable[..., Session]]:
     """Factory for sessions on their own connections.
 
     Each one is a separate connection to the same database, so two of them can
@@ -85,15 +85,25 @@ def new_session() -> Iterator[Callable[[], Session]]:
     engines = []
     sessions = []
 
-    def make() -> Session:
+    def make(lock_timeout_ms: int = 4000, statement_timeout_ms: int = 8000) -> Session:
+        """A session on its own connection.
+
+        The timeouts are arguments because the retry tests need a lock timeout
+        short enough to fire deliberately — 55P03 is the sqlstate the retry
+        loop exists for, and it is unreachable with a four-second budget.
+        """
         engine = create_engine(
             os.environ["DATABASE_URL"],
             # One connection each, and no pooling surprises between tests.
             pool_size=1,
             max_overflow=0,
-            # A test that waits on a lock for more than a few seconds has
+            # A test that waits on a lock for longer than it meant to has
             # already failed; fail loudly instead of hanging the suite.
-            connect_args={"options": "-c lock_timeout=4000 -c statement_timeout=8000"},
+            connect_args={
+                "options": (
+                    f"-c lock_timeout={lock_timeout_ms} -c statement_timeout={statement_timeout_ms}"
+                )
+            },
         )
         s = sessionmaker(bind=engine)()
         engines.append(engine)
