@@ -21,7 +21,7 @@ if config.config_file_name is not None:
     # life of the process: no retry warnings, no health-check failures, nothing.
     # It cost a day: the move retry loop was running correctly and its log line
     # was being swallowed, so the tests that assert on it saw zero retries.
-    fileConfig(config.config_file_name, disable_existing_loggers=False)
+    fileConfig(config.config_file_name)
 logger = logging.getLogger("alembic.env")
 
 
