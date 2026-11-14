@@ -4,8 +4,10 @@ Rules for every contributor to **File Explorer**
 (`vinay1500/file-explorer`). Scope: a multi-user folder manager with per-user private trees.
 No payments, no file contents, no third-party data, no PII beyond an email address.
 
-Rules that can be tested are tested. `apps/api/tests/test_security.py` is the enforcement
-mechanism for most of this document — a rule that is only written down is a rule that drifts.
+Rules that can be tested get tested, because a rule that is only written down is a rule that
+drifts. **That suite does not exist yet.** `apps/api/tests/test_security.py` arrives at M5 with
+authentication; until then every rule below is a stated intention, and the test names given
+against them are the names they will have, not names you can run today.
 
 ---
 

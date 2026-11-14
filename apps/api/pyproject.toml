@@ -1,0 +1,63 @@
+[project]
+name = "file-explorer-api"
+version = "0.1.0"
+description = "Hierarchical folder manager API"
+requires-python = ">=3.11"
+
+# Minimums rather than exact pins while the shape is still settling. An
+# exact lock lands at M4, generated from a green CI run so it reflects a
+# combination that is known to work rather than one that looked right.
+dependencies = [
+    "Flask>=3.1",
+    "Flask-SQLAlchemy>=3.1",
+    "SQLAlchemy>=2.0",
+    "Flask-Migrate>=4.0",
+    # psycopg 3, which is what a bare postgresql:// URL resolves to in
+    # SQLAlchemy 2.x. psycopg2 is in maintenance; this is the current driver.
+    "psycopg[binary]>=3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Fail on an unregistered mark rather than silently skipping.
+addopts = "-q --strict-markers"
+markers = [
+    "invariant: exercises one of the numbered invariants in docs/ARCHITECTURE.md",
+    "concurrency: needs two real database connections",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["file_explorer"]
+mypy_path = "src"
+warn_unused_ignores = true
+warn_redundant_casts = true
+# Not strict yet - raised progressively rather than silenced with ignores.
+disallow_untyped_defs = false
+
+# flask_migrate ships no type information.
+[[tool.mypy.overrides]]
+module = "flask_migrate.*"
+ignore_missing_imports = true

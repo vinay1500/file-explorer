@@ -63,12 +63,12 @@ shell-db: ## psql inside the database
 
 migrate: ## Apply migrations to the local database
 	$(need-apps)
-	$(API) alembic upgrade head
+	$(API) flask db upgrade
 
 revision: ## New migration — make revision m="add owner_id"
 	$(need-apps)
 	@test -n "$(m)" || { echo "  usage: make revision m=\"what changed\""; exit 1; }
-	$(API) alembic revision --autogenerate -m "$(m)"
+	$(API) flask db revision --autogenerate -m "$(m)"
 
 # ---------------------------------------------------------------- tests
 

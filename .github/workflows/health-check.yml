@@ -1,0 +1,43 @@
+name: health check
+
+# Twice a day, at the hours someone is actually around to act on a failure.
+# GitHub cron is UTC: 05:30 and 09:00 UTC are 11:00 and 14:30 India time.
+#
+# Deliberately NOT every ten minutes. An earlier plan pinged frequently to keep
+# a free instance warm; that was dropped. GitHub's scheduled workflows are
+# best-effort and are delayed or skipped under load, so a strategy that needs a
+# cron to fire inside every fifteen-minute window all day rests on a guarantee
+# that does not exist. This job is monitoring, not warming.
+on:
+  schedule:
+    - cron: "30 5 * * 1-5"
+    - cron: "0 9 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe the API's readiness endpoint
+        env:
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::notice::API_URL is not set, so there is nothing deployed to probe yet."
+            echo "Set it as a repository variable when the demo goes up."
+            exit 0
+          fi
+
+          # --max-time 120 because a free instance can take most of a minute to
+          # wake. A timeout here is a real failure, not a false alarm.
+          code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 120 \
+                 "$API_URL/api/v1/health" || echo "000")
+
+          echo "  HTTP $code"
+          head -c 300 /tmp/body | sed 's/^/  /'
+
+          if [ "$code" != "200" ]; then
+            echo "::error::health check returned $code - the API cannot reach its database"
+            exit 1
+          fi
+          echo "  healthy"
