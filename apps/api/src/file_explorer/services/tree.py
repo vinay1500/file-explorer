@@ -48,7 +48,7 @@ RETRYABLE = frozenset({"40P01", "55P03"})
 # recognised and mapped, which is a different thing from being retried.
 TIMEOUT = "57014"
 
-_MAX_ATTEMPTS = 3
+_MAX_ATTEMPTS = 1
 
 
 def _constraint_of(exc: IntegrityError) -> str:
