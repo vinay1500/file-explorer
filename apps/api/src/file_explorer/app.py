@@ -20,6 +20,21 @@ from file_explorer.schemas.node import ProblemSchema
 from file_explorer.services.tree import TreeService
 
 
+class ProblemApi(Api):
+    """`Api`, with the error shape the handlers actually send.
+
+    smorest documents its own `Error` schema on every operation --
+    `{code: integer, message: string, errors: object}` -- and that is not what
+    `problems.py` returns. Left alone, the generated document promises one
+    shape and the service sends another, so a generated client's error type is
+    wrong everywhere and nobody finds out until something fails in production.
+
+    `ERROR_SCHEMA` is the single supported override for it.
+    """
+
+    ERROR_SCHEMA = ProblemSchema
+
+
 def create_app(config_object: type[Config] | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config_object or Config)
@@ -39,10 +54,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
 
     limiter.init_app(app)
 
-    api = Api(app)
-    # smorest documents its own error shape by default, which is not RFC 9457.
-    # Overriding it means the generated client's error type matches what the
-    # handlers in `problems.py` actually send.
+    api = ProblemApi(app)
     api.spec.components.schema("Problem", schema=ProblemSchema)
 
     from file_explorer.blueprints.nodes import blp as nodes_blp

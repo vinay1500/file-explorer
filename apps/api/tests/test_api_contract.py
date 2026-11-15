@@ -294,3 +294,37 @@ def test_no_configured_actor_is_401_not_an_open_api(app: Flask) -> None:
         assert _problem(response)["code"] == "UNAUTHENTICATED"
     finally:
         app.config["DEV_ACTOR_ID"] = previous
+
+
+@pytest.mark.invariant
+def test_the_documented_error_shape_is_the_one_actually_sent(client: FlaskClient) -> None:
+    """The document must not promise an error shape the handlers do not send.
+
+    flask-smorest documents its own `Error` schema on every operation --
+    `code` as an **integer**, plus `message` -- while `problems.py` sends RFC
+    9457, where `code` is a string and there is a `type`, `title` and `status`.
+    Left unoverridden, a generated client's error type is wrong on every route
+    and nothing fails until something fails in production.
+    """
+    spec = _problem(client.get("/api/openapi.json"))
+    schemas = spec["components"]["schemas"]  # type: ignore[index]
+
+    default = spec["components"]["responses"]["DEFAULT_ERROR"]  # type: ignore[index]
+    ref = default["content"]["application/json"]["schema"]["$ref"]
+    documented = schemas[ref.rsplit("/", 1)[-1]]
+    properties = documented["properties"]
+
+    assert properties["code"]["type"] == "string", (
+        f"the documented error has code as {properties['code']['type']}; the "
+        "handlers send a string machine-readable code"
+    )
+    for required in ("type", "title", "status"):
+        assert required in properties, (
+            f"the documented error has no {required!r}, so it is not RFC 9457: "
+            f"{sorted(properties)}"
+        )
+
+    # And the live body agrees with the document.
+    body = _problem(client.get("/api/v1/does-not-exist"))
+    assert set(body) >= {"type", "title", "status", "code"}
+    assert isinstance(body["code"], str)
