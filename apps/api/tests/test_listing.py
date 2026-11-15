@@ -176,10 +176,12 @@ def test_the_page_size_is_clamped(svc: TreeService, alice: int) -> None:
     owner has and holds a connection while PostgreSQL materialises it.
     """
     home = svc.create(alice, None, "home", "folder")
-    for n in range(5):
-        svc.create(alice, home, f"f{n}", "file")
+    # More rows than the cap, or asking for a billion proves only that nothing
+    # crashed. The cap has to be the thing that stops it.
+    for n in range(MAX_PAGE + 5):
+        svc.create(alice, home, f"f{n:04d}", "file")
 
-    assert len(svc.list_children(alice, home, limit=10**9)[0]) == 5
+    assert len(svc.list_children(alice, home, limit=10**9)[0]) == MAX_PAGE
     assert len(svc.list_children(alice, home, limit=0)[0]) == 1, "a limit of 0 must not mean all"
     assert len(svc.list_children(alice, home, limit=-5)[0]) == 1
 
