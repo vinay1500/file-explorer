@@ -17,8 +17,11 @@ import json
 from collections.abc import Callable, Iterator
 
 import pytest
-from flask import Flask
+from flask import Flask, request
 from flask.testing import FlaskClient
+
+from file_explorer.app import create_app
+from file_explorer.config import Config
 
 ACTOR_HEADERS: dict[str, str] = {}
 
@@ -298,22 +301,40 @@ def test_no_configured_actor_is_401_not_an_open_api(app: Flask) -> None:
 
 @pytest.mark.invariant
 def test_the_documented_error_shape_is_the_one_actually_sent(client: FlaskClient) -> None:
-    """The document must not promise an error shape the handlers do not send.
+    """The document must not promise an error response the handlers do not send.
 
-    flask-smorest documents its own `Error` schema on every operation --
-    `code` as an **integer**, plus `message` -- while `problems.py` sends RFC
-    9457, where `code` is a string and there is a `type`, `title` and `status`.
-    Left unoverridden, a generated client's error type is wrong on every route
-    and nothing fails until something fails in production.
+    Two axes, and the first version of this test only checked one.
+
+    **Schema.** flask-smorest documents its own `Error` -- `code` as an
+    integer, plus `message` -- while the handlers send RFC 9457, where `code`
+    is a string alongside `type`, `title` and `status`.
+
+    **Media type.** `ERROR_SCHEMA` fixes the schema and leaves the media type
+    at smorest's `application/json`, while the live response is
+    `application/problem+json`. That is the one property the whole module
+    exists to give a client: tell a problem from a body by the media type
+    rather than by guessing from the shape.
+
+    The first version reached the schema through
+    `default["content"]["application/json"]["schema"]` -- a literal index. It
+    could not see a media-type mismatch at all; it *presumed* the answer. Worse,
+    fixing the document would have made it raise `KeyError`, which reads as
+    "the fix broke a test" rather than "the test encoded the bug".
     """
     spec = _problem(client.get("/api/openapi.json"))
     schemas = spec["components"]["schemas"]  # type: ignore[index]
-
     default = spec["components"]["responses"]["DEFAULT_ERROR"]  # type: ignore[index]
-    ref = default["content"]["application/json"]["schema"]["$ref"]
-    documented = schemas[ref.rsplit("/", 1)[-1]]
-    properties = documented["properties"]
 
+    # Derived, not asserted by indexing.
+    documented_types = sorted(default["content"])
+    assert documented_types == ["application/problem+json"], (
+        f"the document declares {documented_types} for errors; the service sends "
+        "application/problem+json, so a generated client keying off the "
+        "documented type matches nothing this service returns"
+    )
+
+    ref = default["content"]["application/problem+json"]["schema"]["$ref"]
+    properties = schemas[ref.rsplit("/", 1)[-1]]["properties"]
     assert properties["code"]["type"] == "string", (
         f"the documented error has code as {properties['code']['type']}; the "
         "handlers send a string machine-readable code"
@@ -323,7 +344,63 @@ def test_the_documented_error_shape_is_the_one_actually_sent(client: FlaskClient
             f"the documented error has no {required!r}: {sorted(properties)}"
         )
 
-    # And the live body agrees with the document.
-    body = _problem(client.get("/api/v1/does-not-exist"))
+    # And the live response agrees with the document on both axes.
+    live = client.get("/api/v1/does-not-exist")
+    assert live.content_type.split(";")[0] == documented_types[0], (
+        f"live {live.content_type!r} vs documented {documented_types[0]!r}"
+    )
+    body = _problem(live)
     assert set(body) >= {"type", "title", "status", "code"}
     assert isinstance(body["code"], str)
+
+
+@pytest.mark.invariant
+def test_every_documented_error_uses_the_problem_media_type(client: FlaskClient) -> None:
+    """Not just the default component -- every operation's own error responses."""
+    spec = _problem(client.get("/api/openapi.json"))
+    wrong = [
+        f"{method.upper()} {path} {status}: {sorted(response['content'])}"
+        for path, methods in spec["paths"].items()  # type: ignore[union-attr]
+        for method, operation in methods.items()
+        if method in {"get", "post", "patch", "delete"}
+        for status, response in operation.get("responses", {}).items()
+        if status.startswith(("4", "5"))
+        and "content" in response
+        and sorted(response["content"]) != ["application/problem+json"]
+    ]
+    assert not wrong, f"error responses documented with the wrong media type: {wrong}"
+
+
+@pytest.mark.invariant
+def test_a_failure_after_the_handler_is_still_a_problem_document() -> None:
+    """The last-resort guarantee, which a config setting was quietly removing.
+
+    `problems.py`'s `Exception` handler covers anything raised *inside*
+    dispatch. It does not cover an `after_request` function, or response
+    processing -- those escape to `Flask.handle_exception`, and
+    `PROPAGATE_EXCEPTIONS = True` makes Flask re-raise them to the WSGI server
+    instead of running them through the handler.
+
+    Under gunicorn that is a bare HTML 500 with a traceback, which is precisely
+    what the module was written to make impossible. The comment justifying the
+    setting described something the setting does not do.
+    """
+    built = create_app(Config)
+    built.config["DEV_ACTOR_ID"] = 1
+
+    @built.after_request
+    def _explode(response: object) -> object:
+        if request.path == "/api/v1/roots":
+            raise RuntimeError("after_request failed with /srv/secret/path in the message")
+        return response
+
+    with built.test_client() as broken:
+        response = broken.get("/api/v1/roots")
+
+    assert response.status_code == 500
+    assert response.content_type.startswith("application/problem+json"), (
+        f"a failure after the handler escaped as {response.content_type!r}"
+    )
+    rendered = response.data.decode()
+    assert "Traceback" not in rendered
+    assert "/srv/secret/path" not in rendered, "the exception message leaked"
