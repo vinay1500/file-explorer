@@ -48,6 +48,20 @@ class DepthExceeded(TreeError):
     title = "Maximum tree depth exceeded"
 
 
+class QuotaExceeded(TreeError):
+    """The owner is already holding as many nodes as they are allowed.
+
+    409 rather than 507 or 429, to stay inside the taxonomy the rest of these
+    use: the same family as `DuplicateName` and `DepthExceeded`, which are also
+    "the state of your tree conflicts with this request, and you can resolve
+    it". A rate limit would be 429; this is not about how fast they asked.
+    """
+
+    code = "QUOTA_EXCEEDED"
+    status = 409
+    title = "Node limit reached"
+
+
 class InvalidName(TreeError):
     """The name is wrong on its own terms, whatever is in the database.
 
