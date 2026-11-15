@@ -44,13 +44,13 @@ def upgrade():
     # column inside the index definition.
     op.drop_index("uq_nodes_parent_name", table_name="nodes")
     op.execute(
-        'CREATE UNIQUE INDEX uq_nodes_parent_name ON nodes (parent_id, name) '
+        'CREATE UNIQUE INDEX uq_nodes_parent_name ON nodes (parent_id, name COLLATE "C") '
         "WHERE parent_id IS NOT NULL"
     )
 
     op.drop_index("uq_nodes_root_name", table_name="nodes")
     op.execute(
-        'CREATE UNIQUE INDEX uq_nodes_root_name ON nodes (owner_id, name) '
+        'CREATE UNIQUE INDEX uq_nodes_root_name ON nodes (owner_id, name COLLATE "C") '
         "WHERE parent_id IS NULL"
     )
 

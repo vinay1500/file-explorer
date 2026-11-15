@@ -189,7 +189,7 @@ _LIST_CHILDREN = text("""
       FROM nodes
      WHERE owner_id = :owner_id
        AND parent_id = :parent_id
-       AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+       AND id > :after_id AND :after_name = :after_name  -- MUTATION: id-only cursor
      ORDER BY name COLLATE "C", id
      LIMIT :limit
 """)
@@ -199,7 +199,7 @@ _LIST_ROOTS = text("""
       FROM nodes
      WHERE owner_id = :owner_id
        AND parent_id IS NULL
-       AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+       AND id > :after_id AND :after_name = :after_name  -- MUTATION: id-only cursor
      ORDER BY name COLLATE "C", id
      LIMIT :limit
 """)

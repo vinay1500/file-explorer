@@ -80,12 +80,12 @@ def _clamp(limit: int) -> int:
     Unbounded, `limit` is a denial-of-service knob: one request asks for every
     row the owner has and holds a connection while PostgreSQL materialises it.
     """
-    return max(1, min(limit, MAX_PAGE))
+    return limit  # MUTATION: no clamp
 
 
 def _fetch(limit: int) -> int:
-    """One more than the page, to learn whether another page exists."""
-    return _clamp(limit) + 1
+    """MUTATION: no lookahead row."""
+    return _clamp(limit)
 
 
 def _start(after: Cursor) -> tuple[str, int]:
