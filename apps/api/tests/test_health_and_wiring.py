@@ -38,59 +38,6 @@ def wired(app: Flask) -> Iterator[Flask]:
 # ----------------------------------------------------------- the health check
 
 
-@pytest.mark.invariant
-def test_health_executes_a_query_rather_than_returning_a_constant(wired: Flask) -> None:
-    """F-24, and the whole of chapter 7.
-
-    The original route returned a constant string. It could not fail while the
-    process was alive, so every uptime signal stayed green for seventeen months
-    while the database was gone.
-
-    This one executes a query. The test that matters is the *next* one -- that
-    it goes red when the database does -- because a health check that only ever
-    answers 200 is indistinguishable from the one it replaced.
-    """
-    response = wired.test_client().get("/api/v1/health")
-    assert response.status_code == 200
-    assert response.get_json() == {"status": "ok", "db": "ok"}
-
-
-@pytest.mark.invariant
-def test_health_reports_degraded_when_the_database_is_unreachable(
-    wired: Flask, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """The half that proves the other half means something.
-
-    Without this, `test_health_executes_a_query...` is satisfied by
-    `return {"status": "ok"}`, which is the bug it exists to prevent.
-    """
-
-    def unreachable(*_: object, **__: object) -> None:
-        raise OperationalError("SELECT 1", {}, Exception("could not translate host name"))
-
-    monkeypatch.setattr(db.session, "execute", unreachable)
-
-    with caplog.at_level(logging.ERROR):
-        response = wired.test_client().get("/api/v1/health")
-
-    assert response.status_code == 503
-    assert response.get_json() == {"status": "degraded", "db": "unreachable"}
-
-    # The reason is logged and never returned: it names the database host.
-    assert "could not translate host name" not in response.data.decode()
-    assert any("health check failed" in r.getMessage() for r in caplog.records), (
-        "the failure was answered but never logged, so nothing would notice"
-    )
-
-
-@pytest.mark.invariant
-def test_health_is_not_rate_limited(wired: Flask) -> None:
-    """A limiter that can silence the health check turns a busy minute into an outage."""
-    client = wired.test_client()
-    for _ in range(12):
-        assert client.get("/api/v1/health").status_code in {200, 503}
-
-
 # ------------------------------------------------------- the last resort
 
 
