@@ -94,7 +94,7 @@ The walk built to protect the cycle detector is the thing that defeats it.
 
 ```mermaid
 flowchart LR
-    A["chain is 65 deep<br/>cap is 64"] --> B["CTE stops at depth 64"]
+    A["chain is 66 deep<br/>cap is 64"] --> B["CTE stops at depth 64"]
     B --> C["ancestry returns<br/>65 of 66 rows"]
     C --> D{"is the destination<br/>in this list?"}
     D -->|"it is the row<br/>that was cut"| E["answers NO"]

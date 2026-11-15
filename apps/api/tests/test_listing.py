@@ -17,7 +17,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from file_explorer.errors import NodeNotFound
+from file_explorer.errors import FileAsParent, NodeNotFound
 from file_explorer.services.tree import MAX_PAGE, TreeService
 
 MAX_DEPTH = 64
@@ -289,8 +289,33 @@ def test_ordering_is_byte_order_and_that_is_a_real_choice(
     ]
     byte_order = _names(svc.list_children(alice, home))
 
-    assert byte_order == ["Banana", "Zebra", "apple"], f"not byte order: {byte_order}"
-    assert linguistic != byte_order, (
-        "the ICU collation agrees with byte order on this data, so this test "
-        f"cannot tell them apart: {linguistic}"
-    )
+    try:
+        assert byte_order == ["Banana", "Zebra", "apple"], f"not byte order: {byte_order}"
+        assert linguistic != byte_order, (
+            "the ICU collation agrees with byte order on this data, so this test "
+            f"cannot tell them apart: {linguistic}"
+        )
+    finally:
+        # `_clean` truncates tables and knows nothing about collations, so
+        # without this the object survives the test, the session, and every
+        # session after it. `IF NOT EXISTS` hid the accumulation rather than
+        # preventing it.
+        session.rollback()
+        session.execute(text("DROP COLLATION IF EXISTS linguistic"))
+        session.commit()
+
+
+@pytest.mark.invariant
+def test_listing_the_children_of_a_file_is_an_error_not_an_empty_page(
+    svc: TreeService, alice: int
+) -> None:
+    """I5 again, from the read side.
+
+    A file is always a leaf, so "the children of a file" has no answer.
+    `create` refuses it with `FileAsParent`; this used to return an empty page,
+    which quietly accepts the same mistake and makes it look like an empty
+    folder.
+    """
+    doc = svc.create(alice, None, "notes.txt", "file")
+    with pytest.raises(FileAsParent):
+        svc.list_children(alice, doc)

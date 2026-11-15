@@ -321,7 +321,7 @@ class NodeRepository:
         the rows the lock query returned -- the obvious optimisation -- lets two
         moves across separate trees commit a 4-cycle.
         """
-        return bool(
+        found, deepest = (
             self._s.execute(
                 text("""
                 WITH RECURSIVE ancestry AS (
@@ -336,7 +336,8 @@ class NodeRepository:
                      WHERE n.owner_id = :owner_id
                        AND a.depth < :max_depth
                 )
-                SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id)
+                SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id) AS found,
+                       COALESCE((SELECT max(depth) FROM ancestry), 0) AS deepest
                 """),
                 {
                     "node_id": node_id,
@@ -344,8 +345,20 @@ class NodeRepository:
                     "owner_id": owner_id,
                     "max_depth": self._max_depth,
                 },
-            ).scalar_one()
+            ).one()
         )
+        # The one bounded walk that used to have no truncation check. A
+        # truncated ancestry here answers "no, not an ancestor" for a node that
+        # is one -- which is the cycle check failing open, the exact failure the
+        # depth bound exists to prevent. Statement ordering in `_move_once`
+        # happened to catch it first; that is luck, not a guard.
+        if int(deepest) >= self._max_depth:
+            log.error(
+                "ancestor walk hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return bool(found)
 
     def lock_ancestry(self, owner_id: int, node_id: int) -> list[int]:
         """Lock `node_id` and every node above it. Returns the locked ids.

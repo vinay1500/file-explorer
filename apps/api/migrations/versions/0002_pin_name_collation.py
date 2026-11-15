@@ -78,6 +78,12 @@ def _assert_no_duplicates() -> None:
 def upgrade():
     _assert_no_duplicates()
 
+    # This is a blocking rebuild. DROP INDEX and CREATE UNIQUE INDEX without
+    # CONCURRENTLY hold ACCESS EXCLUSIVE on `nodes` for the duration, so writes
+    # queue behind it. Correct inside a migration transaction, and fine at this
+    # table's size; on a large one it wants CONCURRENTLY, which cannot run
+    # inside a transaction and so needs a different migration shape.
+    #
     # Dropped and recreated rather than altered: PostgreSQL has no
     # ALTER INDEX ... COLLATE, and the collation is a property of the indexed
     # column inside the index definition.

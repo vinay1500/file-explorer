@@ -275,15 +275,19 @@ def test_the_ceiling_is_per_owner_not_global(
 
 
 @pytest.mark.invariant
-def test_the_service_takes_its_bounds_from_configuration(app: Flask) -> None:
+def test_the_service_takes_its_bounds_from_configuration(
+    app: Flask, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Gate 1's "four config values are read by nothing", closed.
 
     Built through the factory rather than by hand, because by hand is exactly
     how the values stayed unread.
     """
+    # monkeypatch, not assignment: the `app` fixture is session-scoped, so an
+    # unrestored write here would hand 7 and 11 to every test that ran after.
     with app.app_context():
-        app.config["MAX_TREE_DEPTH"] = 7
-        app.config["MAX_NODES_PER_USER"] = 11
+        monkeypatch.setitem(app.config, "MAX_TREE_DEPTH", 7)
+        monkeypatch.setitem(app.config, "MAX_NODES_PER_USER", 11)
         built = tree_service()
 
     assert built._max_depth == 7, "MAX_TREE_DEPTH did not reach the service"

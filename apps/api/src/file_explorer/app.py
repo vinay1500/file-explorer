@@ -67,8 +67,13 @@ def tree_service(session: Session | None = None) -> TreeService:
     knows about both is the application factory's module, not the domain.
     """
     # `db.session` is a scoped_session proxy, not a Session. Calling it
-    # resolves the Session registered for this scope -- which is what the
-    # proxy would have forwarded to anyway, just with a type that says so.
+    # resolves the Session registered for this scope -- the one the proxy would
+    # have forwarded to -- with a type that says so.
+    #
+    # That resolution is eager, so the result is **request-scoped**: the
+    # TreeService returned here holds that Session object, not the proxy, and
+    # keeping one past the end of the request would keep a stale Session. Build
+    # one per request; do not cache it on the app.
     return TreeService(
         session if session is not None else db.session(),
         current_app.config["MAX_TREE_DEPTH"],
