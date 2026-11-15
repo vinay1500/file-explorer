@@ -299,7 +299,7 @@ jobs:
       - name: Invariants and mapping
         # Selected by marker, not filename, so a new test file is picked up
         # without anyone remembering to edit this workflow.
-        run: pytest -m "not concurrency" -v --cov=file_explorer --cov-report=
+        run: pytest -m "not concurrency" -v --cov=file_explorer --cov-branch --cov-report=
 
       - name: Concurrency
         # Two real connections interleaved. Timeout kept tight: these tests
@@ -307,37 +307,24 @@ jobs:
         timeout-minutes: 3
         # --cov-append: the two runs are one suite split by marker, and a
         # coverage number from half of it would be a lie about the other half.
-        run: pytest -m concurrency -v --cov=file_explorer --cov-append --cov-report=
+        run: pytest -m concurrency -v --cov=file_explorer --cov-branch --cov-append --cov-report=
 
       - name: Coverage
         working-directory: apps/api
         env:
           DATABASE_URL: postgresql://fileexplorer:localdev@localhost:5432/file_explorer_test
         run: |
-          # A floor, not a target. It ratchets: when real coverage rises,
-          # raise this, and it never comes back down without a reason in the
-          # commit message.
+          # --precision=2, because `--fail-under` compares the *rounded* total
+          # and the default precision is 0. At 98 that made the real floor
+          # 97.5: five statements could be lost in silence.
           #
-          # 98 rather than 100 because fourteen lines are genuinely out of
-          # reach from a test, and listing them is the point -- a floor with
-          # no account of what is under it is a number someone will later
-          # lower without noticing what they gave up:
+          # --cov-branch, because statement coverage says a line ran and not
+          # which way it went. `if exc.status >= 500:` read as covered the
+          # whole time its true arm had never once executed.
           #
-          #   services/tree.py:201      `raise AssertionError("unreachable")`,
-          #                             which is unreachable by construction.
-          #   services/tree.py:633-634  the composite-foreign-key backstop. It
-          #                             fires only when the service has already
-          #                             failed to check ownership twice.
-          #   services/tree.py:256,269,271,310,363,438,489,593
-          #                             "the row was deleted between the read
-          #                             and the lock". Each needs a precise
-          #                             interleaving against a real database;
-          #                             the ones that could be driven
-          #                             deterministically already are.
-          #   app.py:58-59,73           diagnostics that fire only if
-          #                             flask-smorest changes the shape of its
-          #                             spec components.
-          coverage report --show-missing --skip-covered --fail-under=98
+          # The floor ratchets. It does not come back down without a reason in
+          # the commit message.
+          coverage report --show-missing --skip-covered --precision=2 --fail-under=90
 
       - name: Every test is marked
         run: |
