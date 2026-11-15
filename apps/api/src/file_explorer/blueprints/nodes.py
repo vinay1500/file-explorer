@@ -21,6 +21,7 @@ from flask.views import MethodView
 from flask_smorest import Blueprint
 
 from file_explorer import cursors
+from file_explorer.problems import PROBLEM_CONTENT_TYPE
 from file_explorer.app import tree_service
 from file_explorer.auth import require_actor
 from file_explorer.extensions import db
@@ -46,6 +47,13 @@ blp = Blueprint(
 # 401 is declared on every route below, not because anything returns it today
 # but because `require_actor` will at M5 -- a client generated now should
 # already handle being unauthenticated.
+#
+# `content_type` on every one of these is load-bearing. smorest documents error
+# responses with `Api.DEFAULT_RESPONSE_CONTENT_TYPE`, which is
+# `application/json`, while the handlers send `application/problem+json` --
+# and telling a problem from a body by its media type is the single property
+# RFC 9457 was adopted for. `ERROR_SCHEMA` fixes the schema and leaves this
+# alone.
 
 
 def _page(result: tuple[list[dict[str, object]], tuple[str, int] | None]) -> dict[str, Any]:
@@ -57,8 +65,8 @@ def _page(result: tuple[list[dict[str, object]], tuple[str, int] | None]) -> dic
 class Roots(MethodView):
     @blp.arguments(PageQuerySchema, location="query")
     @blp.response(200, PageSchema)
-    @blp.alt_response(422, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def get(self, query: dict[str, Any]) -> dict[str, Any]:
         """One page of the caller's root folders and files."""
         actor = require_actor()
@@ -74,10 +82,10 @@ class Roots(MethodView):
 class Nodes(MethodView):
     @blp.arguments(NodeCreateSchema)
     @blp.response(201, NodeSchema)
-    @blp.alt_response(404, schema=ProblemSchema)
-    @blp.alt_response(409, schema=ProblemSchema)
-    @blp.alt_response(422, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def post(self, body: dict[str, Any]) -> dict[str, Any]:
         """Create a folder or a file. `parent_id` of null creates a root."""
         actor = require_actor()
@@ -91,10 +99,10 @@ class Nodes(MethodView):
 class Node(MethodView):
     @blp.arguments(NodeRenameSchema)
     @blp.response(200, NodeSchema)
-    @blp.alt_response(404, schema=ProblemSchema)
-    @blp.alt_response(409, schema=ProblemSchema)
-    @blp.alt_response(422, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def patch(self, body: dict[str, Any], node_id: int) -> dict[str, Any]:
         """Rename a node in place."""
         actor = require_actor()
@@ -104,8 +112,8 @@ class Node(MethodView):
         return svc.get(actor, node_id)
 
     @blp.response(200, DeletedSchema)
-    @blp.alt_response(404, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def delete(self, node_id: int) -> dict[str, Any]:
         """Delete a node and everything under it."""
         actor = require_actor()
@@ -119,10 +127,10 @@ class Node(MethodView):
 class Children(MethodView):
     @blp.arguments(PageQuerySchema, location="query")
     @blp.response(200, PageSchema)
-    @blp.alt_response(404, schema=ProblemSchema)
-    @blp.alt_response(409, schema=ProblemSchema)
-    @blp.alt_response(422, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def get(self, query: dict[str, Any], node_id: int) -> dict[str, Any]:
         """One page of a folder's contents. A file is a 409, not an empty page."""
         actor = require_actor()
@@ -139,8 +147,8 @@ class Children(MethodView):
 @blp.route("/nodes/<int:node_id>/path")
 class Path(MethodView):
     @blp.response(200, PathSchema)
-    @blp.alt_response(404, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def get(self, node_id: int) -> dict[str, Any]:
         """Breadcrumbs, root first."""
         return {"path": tree_service().path(require_actor(), node_id)}
@@ -150,11 +158,11 @@ class Path(MethodView):
 class Move(MethodView):
     @blp.arguments(NodeMoveSchema)
     @blp.response(200, NodeSchema)
-    @blp.alt_response(404, schema=ProblemSchema)
-    @blp.alt_response(409, schema=ProblemSchema)
-    @blp.alt_response(422, schema=ProblemSchema)
-    @blp.alt_response(503, schema=ProblemSchema)
-    @blp.alt_response(401, schema=ProblemSchema)
+    @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def post(self, body: dict[str, Any], node_id: int) -> dict[str, Any]:
         """Re-parent a node. `new_parent_id` of null moves it to the root.
 

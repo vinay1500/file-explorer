@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from file_explorer import problems
+from file_explorer.problems import PROBLEM_CONTENT_TYPE
 from file_explorer.config import Config, engine_options
 from file_explorer.extensions import db, limiter, migrate
 from file_explorer.schemas.node import ProblemSchema
@@ -33,6 +34,27 @@ class ProblemApi(Api):
     """
 
     ERROR_SCHEMA = ProblemSchema
+
+
+def _retype_default_error(api: Api) -> None:
+    """Re-declare the shared error response as `application/problem+json`.
+
+    `ERROR_SCHEMA` sets the *schema* of smorest's `DEFAULT_ERROR` component and
+    leaves its media type at `Api.DEFAULT_RESPONSE_CONTENT_TYPE`, which is
+    `application/json`. There is no class attribute for the pair, and setting
+    the default content type on the Api would retype successful responses too.
+
+    So the component is rewritten after registration. Done here rather than in
+    the blueprint because it is one shared component; the per-operation
+    responses pass `content_type` explicitly.
+    """
+    responses = getattr(api.spec.components, "responses", {})
+    default = responses.get(api.DEFAULT_ERROR_RESPONSE_NAME)
+    if not isinstance(default, dict):
+        return
+    content = default.get("content")
+    if isinstance(content, dict) and "application/json" in content:
+        content[PROBLEM_CONTENT_TYPE] = content.pop("application/json")
 
 
 def create_app(config_object: type[Config] | None = None) -> Flask:
@@ -57,6 +79,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # `ERROR_SCHEMA` registers the Problem component itself, so registering it
     # again here raises DuplicateComponentNameError.
     api = ProblemApi(app)
+    _retype_default_error(api)
 
     from file_explorer.blueprints.nodes import blp as nodes_blp
 

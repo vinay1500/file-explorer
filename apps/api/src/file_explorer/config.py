@@ -46,9 +46,18 @@ class Config:
     OPENAPI_URL_PREFIX = "/api"
     OPENAPI_JSON_PATH = "openapi.json"
 
-    # flask-smorest propagates the handler's return value rather than wrapping
-    # it, so the Problem Details handlers in `problems.py` are what clients see.
-    PROPAGATE_EXCEPTIONS = True
+    # PROPAGATE_EXCEPTIONS is deliberately NOT set.
+    #
+    # It was, with a comment claiming it made smorest return the handler's
+    # value. That is not what it does. Its only effect is in
+    # `Flask.handle_exception`: set to True, Flask re-raises to the WSGI server
+    # anything that escapes dispatch -- an `after_request` function, response
+    # processing, a failing handler -- instead of running it through the
+    # registered 500 handler. Under gunicorn that is a bare HTML page and a
+    # traceback, which is exactly what `problems.py` exists to make impossible.
+    #
+    # The `Exception` handler already covers everything raised inside dispatch,
+    # so the setting bought nothing and cost the last-resort guarantee.
 
     # Who the API thinks is calling, until M5. No default on purpose: a
     # deployment that forgets this fails closed with 401 rather than open on
