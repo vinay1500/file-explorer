@@ -49,15 +49,17 @@ depends_on = None
 
 def _assert_no_duplicates() -> None:
     """Fail readably if the data already breaks what we are about to enforce."""
-    rows = op.get_bind().execute(
+    bind = op.get_bind()
+    rows = bind.execute(
         sa.text("""
-        SELECT 'uq_nodes_parent_name' AS idx, parent_id::text AS scope, name, count(*) AS n
+        SELECT 'uq_nodes_parent_name' AS idx, parent_id::text AS scope,
+               min(name) AS example, count(*) AS n
           FROM nodes
          WHERE parent_id IS NOT NULL
          GROUP BY parent_id, name COLLATE "C"
         HAVING count(*) > 1
          UNION ALL
-        SELECT 'uq_nodes_root_name', owner_id::text, name, count(*)
+        SELECT 'uq_nodes_root_name', owner_id::text, min(name), count(*)
           FROM nodes
          WHERE parent_id IS NULL
          GROUP BY owner_id, name COLLATE "C"
