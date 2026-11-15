@@ -349,23 +349,13 @@ class TreeService:
         #    the delete, the escaped subtree survives -- correctly -- and the
         #    count is high by its size. The alternative is locking every row in
         #    the subtree, which is the cost this design exists to avoid.
-        if not self._repo.lock_one(actor_id, node_id):
-            raise NodeNotFound  # deleted between the read and the lock
 
-        # 3. Count while holding the lock.
-        removed = self._repo.subtree_size(actor_id, node_id)
-
-        # MUTATION: the original bug -- orphan the children instead of cascading.
-        from sqlalchemy import text as _t
-
-        self._s.execute(
-            _t("UPDATE nodes SET parent_id = NULL WHERE parent_id = :p AND owner_id = :o"),
-            {"p": node_id, "o": actor_id},
-        )
+        # 4. Delete the root of the subtree; the cascade does the rest.
         if self._repo.delete_node(actor_id, node_id) == 0:
             raise NodeNotFound
 
-        return removed
+        # MUTATION: count after the delete rather than before.
+        return self._repo.subtree_size(actor_id, node_id)
 
     # ---------------------------------------------------------------- reads
 
