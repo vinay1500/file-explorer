@@ -463,13 +463,13 @@ def test_no_node_can_be_created_past_the_cap_while_the_chain_moves(
     grafter = new_session(lock_timeout_ms=1500)
 
     def blocked() -> int:
+        # pg_locks, not pg_stat_activity: the latter is snapshot-cached inside a
+        # transaction (`stats_fetch_consistency`), so polling it from a session
+        # that never ends its transaction returns the same answer forever.
+        # Rolling back first makes each poll a fresh read either way.
+        session.rollback()
         return int(
-            session.execute(
-                text(
-                    "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
-                    "AND datname = current_database()"
-                )
-            ).scalar_one()
+            session.execute(text("SELECT count(*) FROM pg_locks WHERE NOT granted")).scalar_one()
         )
 
     # T3 holds R, so the two transactions behind it queue in a known order.
