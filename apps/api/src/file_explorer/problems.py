@@ -109,7 +109,20 @@ def register(app: Flask) -> None:
         # rather than derived from anything the caller sent -- except on 404,
         # where it would otherwise repeat the path. `instance` already has it.
         detail = exc.description if status != 404 else None
-        return _problem(status, _HTTP_CODES.get(status, "HTTP_ERROR"), exc.name, detail)
+
+        # flask-smorest catches marshmallow's ValidationError inside
+        # `@blp.arguments` and re-raises it as an HTTPException with the field
+        # messages attached to `.data`. So the handler below never sees those,
+        # and without this the 422 for an unknown field arrives with no
+        # indication of which field -- which is most of its value.
+        errors = getattr(exc, "data", {}).get("errors") if hasattr(exc, "data") else None
+        return _problem(
+            status,
+            _HTTP_CODES.get(status, "HTTP_ERROR"),
+            exc.name,
+            detail,
+            _truncate_keys(errors) if errors else None,
+        )
 
     @app.errorhandler(Exception)
     def _unhandled(exc: Exception) -> tuple[Response, int]:
