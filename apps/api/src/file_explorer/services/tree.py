@@ -350,12 +350,14 @@ class TreeService:
         #    count is high by its size. The alternative is locking every row in
         #    the subtree, which is the cost this design exists to avoid.
 
+        # 3. Count while holding the lock.
+        removed = self._repo.subtree_size(actor_id, node_id)
+
         # 4. Delete the root of the subtree; the cascade does the rest.
         if self._repo.delete_node(actor_id, node_id) == 0:
             raise NodeNotFound
 
-        # MUTATION: count after the delete rather than before.
-        return self._repo.subtree_size(actor_id, node_id)
+        return removed
 
     # ---------------------------------------------------------------- reads
 

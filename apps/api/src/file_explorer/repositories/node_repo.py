@@ -378,6 +378,12 @@ class NodeRepository:
             _SUBTREE_SIZE,
             {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
         ).one()
+        if int(deepest) >= self._max_depth:
+            log.error(
+                "subtree count hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
         return int(count)
 
     def delete_node(self, owner_id: int, node_id: int) -> int:
