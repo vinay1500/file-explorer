@@ -60,6 +60,20 @@ class InvalidName(TreeError):
     title = "Invalid name"
 
 
+class InvalidType(TreeError):
+    """`type` is neither "file" nor "folder".
+
+    Checked in the service rather than left to the enum. A bad value reaches
+    PostgreSQL as `invalid input value for enum node_type`, which is a
+    `DataError` rather than an `IntegrityError` -- so it would miss `_translate`
+    entirely and escape as a driver exception carrying the statement.
+    """
+
+    code = "INVALID_TYPE"
+    status = 422
+    title = "Invalid node type"
+
+
 class OperationTimedOut(TreeError):
     """The statement exceeded `statement_timeout`.
 
@@ -70,6 +84,25 @@ class OperationTimedOut(TreeError):
     code = "OPERATION_TIMED_OUT"
     status = 503
     title = "Operation took too long"
+
+
+class TreeTooDeep(TreeError):
+    """A recursive walk hit its depth bound, so its answer is incomplete.
+
+    Not the same thing as `DepthExceeded`, which rejects an operation that
+    *would* break I7. This says I7 is **already** broken in stored data: the
+    walk was cut short and returned a partial chain. 500, not 409 -- the caller
+    did nothing wrong and retrying will not help.
+
+    It exists because the alternative is silence. The CTEs are bounded to stop
+    a cycle exhausting memory, and an unchecked bound means a truncated
+    ancestry is indistinguishable from a complete one -- which would make the
+    cycle check fail open on exactly the data it guards against.
+    """
+
+    code = "TREE_TOO_DEEP"
+    status = 500
+    title = "Stored tree exceeds the depth bound"
 
 
 class StorageError(TreeError):
