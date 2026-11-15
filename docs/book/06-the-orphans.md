@@ -95,6 +95,71 @@ so the risk is real; it simply is not reachable from *every* spelling of the ope
 > `test_orm_de_association_does_not_delete` loads the collection first, asserts it contains the
 > child, then detaches — and the assertion on that load is load-bearing, not decoration.
 
+## Deleting, and the number you report
+
+The cascade is what makes `delete` more than one statement. `DELETE FROM nodes WHERE id = :id`
+removes an arbitrary number of rows, and the API wants to say how many. Two things fall out of
+that, and the second is where a test of mine turned out to prove nothing.
+
+**The count has to come first.** `rowcount` sees only the row the statement named — the cascade is
+invisible to it — and afterwards there is nothing left to count. So the subtree is counted, then
+deleted.
+
+**The count has to be taken under the lock.** Otherwise a create that is already in flight beneath
+the doomed node gets destroyed by the cascade without ever being counted, and the caller is told a
+number that is smaller than what was actually removed.
+
+```
+lock, then count                      count, then lock
+----------------                      ----------------
+delete blocks on the lock             count is a plain read: 2
+create commits (3 nodes)              delete blocks on the DELETE
+delete wakes, counts 3                create commits (3 nodes)
+removes 3, reports 3     ✓            wakes, cascade removes 3, reports 2   ✗
+```
+
+One row is enough to lock. `create` locks its parent's **entire** ancestry, so a create anywhere
+beneath this node already conflicts with a lock on the node itself. A move *out* of the subtree is
+the case this does not serialise — it locks the node it moves and the destination chain, neither of
+which need include the doomed node — and the code says so in a comment rather than implying a
+guarantee it does not have. Locking every row in the subtree is exactly the cost the design avoids.
+
+### The test that proved nothing, again
+
+The first version asserted that a create beneath the doomed node blocks while that node is locked.
+It did this by calling `lock_one` directly. It passed with the lock removed from `delete`
+altogether, because it never went through `delete` at all — it tested that PostgreSQL's row locks
+work, which was not in doubt.
+
+Mutation testing caught it: the whole suite stayed green with the lock deleted.
+
+> This is the **third** test in this project that could not fail for its stated reason. The other
+> two are in [chapter 6 above](#it-only-fires-on-some-paths-and-that-matters) and chapter 10. The
+> pattern is the same every time — the test reaches past the thing it is testing and asserts
+> something about a lower layer instead.
+
+What fixes it is finding an observable that differs between the two orderings. Both block. Both
+end with an empty table. The only thing that differs is **the number `delete` returns**, so that
+is what the test asserts:
+
+```python
+assert reported["count"] == 3, (
+    f"delete reported {reported['count']} nodes but removed 3 — it counted the "
+    "subtree before taking its lock, so a create that was in flight was "
+    "destroyed without ever being counted"
+)
+```
+
+Re-run against the same mutation, it fails with `delete reported 2 nodes but removed 3` — the exact
+number the docstring predicts.
+
+### `57014`, which is why this needed handling at all
+
+A cascading delete of a large subtree can exceed `statement_timeout`, having already held locks on
+every row for the whole budget. It is mapped to 503 and deliberately **not** retried: the second
+attempt spends the same budget and fails the same way. See
+[chapter 10](10-the-race-nobody-sees.md) for the full table of sqlstates.
+
 ## The general shape
 
 Every ORM has a delete-behaviour default, and in most of them the default is not what a beginner
