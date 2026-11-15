@@ -613,9 +613,9 @@ def test_the_chain_coverage_check_rejects_a_stale_lock_set(
         svc.create(alice, middle, "child", "folder")
     session.rollback()
 
-    assert (
-        session.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 2
-    ), "a node was created against a chain the service never locked"
+    assert session.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 2, (
+        "a node was created against a chain the service never locked"
+    )
 
 
 @pytest.mark.invariant
