@@ -9,9 +9,9 @@ other than what it is.
 The last one matters most for a file manager, because the whole interface is a
 list of names a person reads and clicks.
 
-**What this does not cover.** Homoglyphs across scripts -- Latin `o`, Greek
-`ο`, Cyrillic `о` -- render identically and are not addressed here. So do
-visually similar spaces inside a name. Both need a confusable-skeleton check
+**What this does not cover.** Homoglyphs across scripts -- Latin `o` (U+006F),
+Greek omicron (U+03BF) and Cyrillic small o (U+043E) render identically and are
+not addressed here. So do visually similar spaces inside a name. Both need a confusable-skeleton check
 against the Unicode security data, which is a different piece of work with
 real false-positive risk for multilingual names. What is covered is narrower
 and stated as such: **look-alikes built from characters that render as
