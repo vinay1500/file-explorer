@@ -35,6 +35,15 @@ from file_explorer.services.tree import TreeService
 MAX_DEPTH = 64
 
 
+def _wait_until(predicate: Callable[[], bool], seconds: float = 10.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
 @pytest.fixture
 def svc(session: Session) -> TreeService:
     return TreeService(session, MAX_DEPTH)
@@ -403,3 +412,145 @@ def test_create_does_not_block_an_unrelated_create(
 
     assert node_id, "the unrelated create should have succeeded"
     assert elapsed < 0.9, f"the unrelated create waited {elapsed:.2f}s on an unrelated lock"
+
+
+# ------------------------------------------- the lock set vs the measurement
+
+
+@pytest.mark.concurrency
+def test_no_node_can_be_created_past_the_cap_while_the_chain_moves(
+    session: Session,
+    alice: int,
+    make_node: Callable[..., int],
+    new_session: Callable[..., Session],
+) -> None:
+    """Gate 3, BLOCK. The lock set and the measurement come from two snapshots.
+
+    `lock_ancestry` decides *which* rows to lock from a recursive CTE evaluated
+    under its own snapshot, and `LockRows` sits above that plan — it does not
+    re-run the CTE after a lock wait. (The same fact chapter 10 records for
+    `move`, which is why step 3 there must be a fresh statement.)
+
+    So if an ancestor is re-parented while `create` is waiting for its lock,
+    `create` wakes holding locks on a chain that no longer exists, then measures
+    a *fresh* chain that is longer. Nothing checks that what it locked covers
+    what it measured, and the comment claims otherwise:
+
+        "The lock is what makes the measurement mean anything."
+
+    The interleaving below leaves a node one level past the cap, and the PR's
+    own truncation guards then turn that into a 500 on `path()` and on
+    `delete()` of any ancestor — so the owner cannot clear it.
+
+    `insert_node` is patched to pause between the measurement and the insert.
+    That is a test seam, not a production change: it removes the only timing
+    dependence that could not be made deterministic, and the race is reachable
+    without it.
+    """
+    cap = 6
+    # R -> P, and two spare two-deep chains to graft onto.
+    r = make_node(alice, "R")
+    p = make_node(alice, "P", parent_id=r)
+    d1 = make_node(alice, "D1")
+    d2 = make_node(alice, "D2", parent_id=d1)
+    e1 = make_node(alice, "E1")
+    e2 = make_node(alice, "E2", parent_id=e1)
+    session.commit()
+
+    holder = new_session()
+    mover = new_session(lock_timeout_ms=10000)
+    creator = new_session(lock_timeout_ms=10000)
+    grafter = new_session(lock_timeout_ms=1500)
+
+    def blocked() -> int:
+        return int(
+            session.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' "
+                    "AND datname = current_database()"
+                )
+            ).scalar_one()
+        )
+
+    # T3 holds R, so the two transactions behind it queue in a known order.
+    assert TreeService(holder, cap)._repo.lock_one(alice, r)
+
+    measured = threading.Event()
+    proceed = threading.Event()
+    outcome: dict[str, object] = {}
+
+    # T2: a legal move that makes P deeper. 2 + 1 + 1 = 4 <= 6.
+    def do_move() -> None:
+        try:
+            TreeService(mover, cap).move(alice, r, d2)
+            mover.commit()
+            outcome["move"] = "ok"
+        except Exception as exc:
+            mover.rollback()
+            outcome["move"] = type(exc).__name__
+
+    t_move = threading.Thread(target=do_move, daemon=True)
+    t_move.start()
+    assert _wait_until(lambda: blocked() >= 1), "the move never queued behind the holder"
+
+    # T1: creates under P. Its CTE snapshot sees only {P, R}.
+    def do_create() -> None:
+        svc = TreeService(creator, cap)
+        original = svc._repo.insert_node
+
+        def paused(*args: object, **kwargs: object) -> int:
+            measured.set()  # depth has been measured; let the graft run
+            proceed.wait(timeout=15)
+            return original(*args, **kwargs)  # type: ignore[arg-type]
+
+        svc._repo.insert_node = paused  # type: ignore[method-assign]
+        try:
+            svc.create(alice, p, "x", "folder")
+            creator.commit()
+            outcome["create"] = "ok"
+        except Exception as exc:
+            creator.rollback()
+            outcome["create"] = type(exc).__name__
+
+    t_create = threading.Thread(target=do_create, daemon=True)
+    t_create.start()
+    assert _wait_until(lambda: blocked() >= 2), "the create never queued behind the move"
+
+    # Release: T2 takes R and commits, then T1 wakes with a stale lock set.
+    holder.rollback()
+
+    # T4: another legal move, on a chain T1 did not lock. 2 + 1 + 3 = 6 <= 6.
+    measured.wait(timeout=15)
+    try:
+        TreeService(grafter, cap).move(alice, d1, e2)
+        grafter.commit()
+        outcome["graft"] = "ok"
+    except Exception as exc:
+        grafter.rollback()
+        outcome["graft"] = type(exc).__name__
+    proceed.set()
+
+    t_move.join(timeout=20)
+    t_create.join(timeout=20)
+
+    # The assertion is I7 itself, stated against the whole table rather than
+    # against whatever this particular interleaving produced.
+    session.rollback()
+    deepest = session.execute(
+        text("""
+        WITH RECURSIVE walk AS (
+            SELECT id, name, 1 AS level FROM nodes WHERE parent_id IS NULL
+            UNION ALL
+            SELECT n.id, n.name, w.level + 1
+              FROM nodes n JOIN walk w ON n.parent_id = w.id
+             WHERE w.level < 100
+        )
+        SELECT name, level FROM walk ORDER BY level DESC LIMIT 1
+        """)
+    ).one_or_none()
+
+    assert deepest is not None
+    assert deepest[1] <= cap, (
+        f"{deepest[0]!r} sits at level {deepest[1]} against a cap of {cap}. "
+        f"create locked a chain from one snapshot and measured another. {outcome}"
+    )
