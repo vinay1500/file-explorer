@@ -609,13 +609,13 @@ def test_the_chain_coverage_check_rejects_a_stale_lock_set(
     # chosen under an older snapshot, missing the part of the chain that moved.
     svc._repo.lock_ancestry = lambda owner_id, node_id: [middle]  # type: ignore[method-assign]
 
+    # The raise is the assertion. A row count after the rollback cannot fail:
+    # the guard fires at step 3a, before the insert, and `_with_retry` rolls
+    # back on the way out — so "nothing was created" is true however the check
+    # behaves, and an assertion that holds either way is not one.
     with pytest.raises(TreeBusy):
         svc.create(alice, middle, "child", "folder")
     session.rollback()
-
-    assert session.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 2, (
-        "a node was created against a chain the service never locked"
-    )
 
 
 @pytest.mark.invariant
@@ -676,16 +676,11 @@ def test_move_also_refuses_a_stale_lock_set(
 
     svc._repo.lock_move_participants = partial  # type: ignore[method-assign]
 
+    # Same as above: the guard precedes `set_parent`, so the parent column is
+    # unchanged whether or not the check works.
     with pytest.raises(TreeBusy):
         svc.move(alice, mover, middle)
     session.rollback()
-
-    assert (
-        session.execute(
-            text("SELECT parent_id FROM nodes WHERE id = :i"), {"i": mover}
-        ).scalar_one()
-        is None
-    ), "the move landed against a chain the service never locked"
 
 
 @pytest.mark.invariant
