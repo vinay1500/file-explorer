@@ -151,6 +151,40 @@ def make_node(session: Session) -> Callable[..., int]:
 
 
 @pytest.fixture
+def without_owner_fk(session: Session) -> Iterator[None]:
+    """Drop the composite owner key for one test, then put it back.
+
+    Some guards defend against states the composite key makes unreachable, so
+    with the key in place those guards cannot fail and the tests that cover
+    them would pass with the guard deleted. The honest way to test them is to
+    remove the other protection and build the illegal state directly.
+
+    The definition lives here rather than in each test: two copies of this DDL
+    is how one of them quietly re-creates a *different* constraint and the
+    suite keeps passing against a schema nobody meant.
+
+    Teardown deletes every node first -- `ADD CONSTRAINT` validates existing
+    rows, so the illegal state has to go before the key comes back, and it has
+    to happen even when the test fails.
+    """
+    session.execute(text("ALTER TABLE nodes DROP CONSTRAINT fk_nodes_parent_same_owner"))
+    try:
+        yield
+    finally:
+        session.rollback()
+        session.execute(text("DELETE FROM nodes"))
+        session.commit()
+        session.execute(
+            text(
+                "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent_same_owner "
+                "FOREIGN KEY (parent_id, owner_id) REFERENCES nodes (id, owner_id) "
+                "ON DELETE CASCADE"
+            )
+        )
+        session.commit()
+
+
+@pytest.fixture
 def alice(make_user: Callable[[str], int]) -> int:
     return make_user("alice@example.com")
 
