@@ -20,10 +20,9 @@ from collections.abc import Callable, Iterator
 import pytest
 from flask import Flask
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
-from file_explorer.errors import OperationTimedOut
+from file_explorer.errors import OperationTimedOut, StorageError, TreeBusy
 from file_explorer.services.tree import RETRYABLE, TIMEOUT, TreeService
 
 MAX_DEPTH = 64
@@ -187,14 +186,25 @@ def test_lock_timeout_is_retried_and_then_succeeds(
 
 
 @pytest.mark.concurrency
-def test_retries_are_bounded_and_then_the_error_escapes(
+def test_retries_are_bounded_and_then_it_gives_up_as_503(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
     new_session: Callable[..., Session],
     retry_log: list[logging.LogRecord],
 ) -> None:
-    """A retry loop that never gives up is a hang, not a retry."""
+    """A retry loop that never gives up is a hang, not a retry.
+
+    This used to assert that the raw `DBAPIError` escaped, and review was right
+    that the test was encoding a leak rather than catching one: `str()` on a
+    `DBAPIError` renders `[SQL: ...]` and `[parameters: ...]`, so letting it
+    out of the service hands the statement, the `owner_id` and the submitted
+    name to whatever is above. The design changed; the test follows.
+
+    The sqlstate is still asserted, from the retry record rather than from the
+    exception — otherwise swapping the exception type would hide which failure
+    was actually being retried.
+    """
     home = make_node(alice, "home")
     sub = make_node(alice, "sub", parent_id=home)
     mover = make_node(alice, "mover")
@@ -206,16 +216,23 @@ def test_retries_are_bounded_and_then_the_error_escapes(
 
     TreeService(holder, MAX_DEPTH)._repo.lock_move_participants(alice, sub, home)
     try:
-        with pytest.raises(DBAPIError) as caught:
+        with pytest.raises(TreeBusy) as caught:
             svc.move(alice, mover, sub)
         actor.rollback()
 
-        sqlstate = getattr(getattr(caught.value, "orig", None), "sqlstate", None)
-        assert sqlstate in RETRYABLE, f"expected a retryable sqlstate, got {sqlstate}"
+        rendered = str(caught.value)
+        assert "[SQL:" not in rendered, f"the statement leaked: {rendered[:200]}"
+        assert "parameters" not in rendered, f"the parameters leaked: {rendered[:200]}"
+        assert caught.value.status == 503
+
         # Three attempts means two retries logged before the third gives up.
         assert _retries(retry_log) == 2, (
             f"expected 2 retries before giving up, saw {_retries(retry_log)}"
         )
+        sqlstates = {
+            getattr(r, "sqlstate", None) for r in retry_log if "contention" in r.getMessage()
+        }
+        assert sqlstates <= RETRYABLE, f"retried something that is not retryable: {sqlstates}"
     finally:
         holder.rollback()
 
@@ -259,16 +276,23 @@ def test_statement_timeout_becomes_503_and_is_not_retried(
 
 
 @pytest.mark.concurrency
-def test_a_non_retryable_database_error_propagates_unchanged(
+def test_a_non_retryable_database_error_does_not_escape_as_a_driver_error(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
     new_session: Callable[..., Session],
     retry_log: list[logging.LogRecord],
 ) -> None:
-    """Only the listed sqlstates retry. Everything else escapes as itself.
+    """Only the listed sqlstates retry. Everything else becomes a domain error.
 
-    A retry loop that swallows unrelated failures turns a bug into a hang.
+    "Propagates unchanged" was the old name, and review was right that it
+    described a leak: a `DBAPIError` carries the statement and the bound
+    parameters, and `StorageError` exists precisely so that cannot cross the
+    service boundary. It was only ever enforced on the two savepoint paths.
+
+    The session must also be left usable-after-rollback rather than aborted,
+    because a caller that maps this to a 4xx and carries on would otherwise hit
+    `25P02` on its next statement — and that error carries its own SQL too.
     """
     a = make_node(alice, "a")
     b = make_node(alice, "b")
@@ -277,17 +301,20 @@ def test_a_non_retryable_database_error_propagates_unchanged(
     actor = new_session()
     svc = TreeService(actor, MAX_DEPTH)
 
-    # 22003 numeric_value_out_of_range — not retryable, not an IntegrityError.
     def explode(*_: object, **__: object) -> None:
         actor.execute(text("SELECT 1/0"))
 
     svc._repo.lock_move_participants = explode  # type: ignore[method-assign]
 
-    with pytest.raises(DBAPIError) as caught:
+    with pytest.raises(StorageError) as caught:
         svc.move(alice, b, a)
-    actor.rollback()
 
-    sqlstate = getattr(getattr(caught.value, "orig", None), "sqlstate", None)
-    assert sqlstate not in RETRYABLE
-    assert sqlstate != TIMEOUT
+    rendered = str(caught.value)
+    assert "[SQL:" not in rendered, f"the statement leaked: {rendered[:200]}"
+    assert "parameters" not in rendered, f"the parameters leaked: {rendered[:200]}"
+    assert caught.value.status == 500
     assert _retries(retry_log) == 0, "a non-retryable error must not be retried"
+
+    # The service rolled back, so the session still works. Before the fix this
+    # raised InternalError 25P02, carrying this statement's own SQL.
+    assert actor.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 2

@@ -154,10 +154,32 @@ class TreeService:
                     log.warning("statement timed out", extra={"op": what, "node_id": node_id})
                     raise OperationTimedOut from exc
                 if sqlstate not in RETRYABLE:
-                    raise
+                    # Roll back for the same reason the retryable path does:
+                    # after any error the transaction is aborted, and every
+                    # later statement on that connection fails with 25P02. A
+                    # caller that maps this to a 4xx and carries on would get a
+                    # dead session for the rest of the request.
+                    self._s.rollback()
+                    # And do not re-raise the driver error. str() on a
+                    # DBAPIError renders [SQL: ...] and [parameters: ...] --
+                    # the statement, the owner_id and whatever the user
+                    # submitted. `_translate` already refuses to let that
+                    # escape from the savepoint paths; this is the other half,
+                    # and without it the guarantee was only half true.
+                    log.exception(
+                        "unmapped database error",
+                        extra={"op": what, "node_id": node_id, "sqlstate": sqlstate},
+                    )
+                    raise StorageError from exc
                 self._s.rollback()
                 if attempt == _MAX_ATTEMPTS:
-                    raise
+                    log.warning(
+                        "gave up on contention",
+                        extra={"op": what, "node_id": node_id, "sqlstate": sqlstate},
+                    )
+                    # 503, not the driver error: the request was valid and the
+                    # only thing wrong was how busy the tree was.
+                    raise TreeBusy from exc
                 log.warning(
                     "contention on %s, retrying",
                     what,
