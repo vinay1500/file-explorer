@@ -66,8 +66,11 @@ def tree_service(session: Session | None = None) -> TreeService:
     knows nothing about Flask, and that is worth keeping -- the place that
     knows about both is the application factory's module, not the domain.
     """
+    # `db.session` is a scoped_session proxy, not a Session. Calling it
+    # resolves the Session registered for this scope -- which is what the
+    # proxy would have forwarded to anyway, just with a type that says so.
     return TreeService(
-        session if session is not None else db.session,
+        session if session is not None else db.session(),
         current_app.config["MAX_TREE_DEPTH"],
         current_app.config["MAX_NODES_PER_USER"],
     )
