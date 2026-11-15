@@ -5,7 +5,7 @@
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/Error"
+              "$ref": "#/components/schemas/Problem"
             }
           }
         },
@@ -38,29 +38,6 @@
             "description": "subtree size when counted",
             "readOnly": true,
             "type": "integer"
-          }
-        },
-        "type": "object"
-      },
-      "Error": {
-        "additionalProperties": false,
-        "properties": {
-          "code": {
-            "description": "Error code",
-            "type": "integer"
-          },
-          "errors": {
-            "additionalProperties": {},
-            "description": "Errors",
-            "type": "object"
-          },
-          "message": {
-            "description": "Error message",
-            "type": "string"
-          },
-          "status": {
-            "description": "Error name",
-            "type": "string"
           }
         },
         "type": "object"
