@@ -3,7 +3,7 @@
 > **Volume IV · Proof.** Not how many tests there are. Whether any of them would
 > notice.
 
-This project has 187 tests and that number is almost meaningless. What is not
+This project has 201 tests and that number is almost meaningless. What is not
 meaningless: **five of them, at different times, passed against the exact bug
 they were written to catch.** Each one read correctly. Each one was reviewed.
 Each proved nothing.
@@ -131,7 +131,7 @@ that had moved.
 
 ## Coverage, used honestly
 
-96% was the number before this milestone, and the uncovered 4% was the
+96% was the number when it was first measured, and the uncovered 4% was the
 interesting 4%:
 
 - the **health endpoint** — no test at all
@@ -144,13 +144,34 @@ interesting 4%:
 A well-covered file can still have nothing behind the five lines that matter.
 The total is a smoke alarm, not a verdict — **read the `Missing` column.**
 
-The floor is 98 and it ratchets. The fourteen lines under it are enumerated in
-the CI step, because a floor with no account of what it excludes is a number
-somebody lowers later without noticing what they gave up. They are: an
-`AssertionError` that is unreachable by construction, the composite-key
-backstop that only fires when the service has already failed twice, eight
-"deleted between the read and the lock" races, and three diagnostics that fire
-only if a dependency changes shape.
+The floor is 99.5 with branch coverage on, and it ratchets.
+
+**It was 98, and the comment setting it claimed fourteen lines were "genuinely
+out of reach from a test".** Review checked each one. The claim held for
+exactly one. Three were contradicted inside the same change — a test that
+patches `delete_node` to return 0 sat a few hundred lines from an identical
+construct declared unreachable, and one of my own comments explained that
+returning `[]` from `lock_ancestry` "would trip the deleted-between-read-and-lock
+check first", which is as close to admitting a line is reachable as a comment
+gets.
+
+Eleven tests later, the honest number is **one**: `raise AssertionError(
+"unreachable: the loop either returns or raises")`, which is unreachable by
+construction. The rest were real failure paths — the row went away between the
+read and the write, the lock could not be taken, a constraint the service
+believes it already prevented fired anyway. The paths that run on the worst
+day, and the ones I had written off.
+
+> **"Hard to reach from a test" and "cannot be reached" are different claims.**
+> Only the second one belongs in a comment, and I put the first one in two book
+> chapters and an interview answer.
+
+Two other things that comment got wrong, which are worth naming because they
+are the same mistake in a smaller key: `--fail-under=98` compares the *rounded*
+total, so the real floor was 97.5 and five statements could go missing in
+silence; and statement coverage says a line ran, not which way it went —
+`if exc.status >= 500:` read as fully covered the entire time its true arm had
+never once executed. Both are fixed with `--precision=2` and `--cov-branch`.
 
 ---
 

@@ -120,6 +120,14 @@ jobs:
           ruff format --diff .
           mypy
 
+      - name: The local format checker agrees with ruff
+        working-directory: .
+        # It runs on itself as well as on the API. It exists so a formatting
+        # slip costs two seconds locally instead of ninety in CI, which is
+        # only true while it stays in agreement -- a false positive here would
+        # send somebody to "fix" something ruff is happy with.
+        run: python3 tools/check_format.py tools apps/api
+
       - name: OpenAPI document is current
         env:
           DEV_ACTOR_ID: 1

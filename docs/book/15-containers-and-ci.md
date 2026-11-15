@@ -27,11 +27,16 @@ Roughly a quarter of all CI runs on this project were spent on code formatting,
 and almost all of them on two mistakes: a string split across two lines that
 would fit on one, and a wrapped signature that would too.
 
-The fix was not discipline. It was a thirty-line standard-library checker that
-runs locally with nothing installed, now covering six rules — split strings
-(whole runs, not pairs), wrapped calls, long lines, unused imports, import
-ordering, and blank lines around definitions. It is validated against a
-CI-verified clean tree, so a false positive is itself a bug in the checker.
+The fix was not discipline. It was [`tools/check_format.py`](../../tools/check_format.py),
+a standard-library script that runs locally with nothing installed, covering
+six rules — split strings (whole runs, not pairs, because ruff only joins when
+the entire run fits), wrapped calls, long lines, unused imports, import
+ordering, and blank lines around definitions.
+
+It is not a linter and under-reports by design: everything it flags, ruff would
+flag too, and the reverse is not true. It is validated by running it against a
+commit CI has already passed, so a false positive is a bug in the checker
+rather than in the code it is reading.
 
 > One rule was written and then **removed**: magic trailing commas. It produced
 > fourteen false positives against a known-clean tree, because nested structures
