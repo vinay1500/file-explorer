@@ -238,8 +238,6 @@ class TreeService:
             parent = self._repo.get(actor_id, parent_id)
             if parent is None:
                 raise NodeNotFound
-            if parent.type == "file":
-                raise FileAsParent  # I5 -- a file is always a leaf
 
             # 2. Lock the parent's chain, then measure it.
             #
@@ -251,6 +249,10 @@ class TreeService:
             #    chain truncates them. A truncated ancestry makes the cycle
             #    check fail open, so the depth cap is load-bearing for I1.
 
+            locked = self._repo.lock_ancestry(actor_id, parent_id)
+            if parent_id not in locked:
+                raise NodeNotFound  # deleted between the read and the lock
+
             # 3. Measure as a FRESH statement, after the locks are held.
             #    `FOR NO KEY UPDATE` does not refresh a recursive CTE, so the
             #    ids returned by step 2 are not a usable ancestry.
@@ -260,7 +262,7 @@ class TreeService:
             level = len(self._repo.ancestry(actor_id, parent_id))
 
         # 4. The new node sits one below its parent.
-        if level + 1 > self._max_depth:
+        if level + 1 > self._max_depth + 1:
             raise DepthExceeded
 
         # 5. Insert, inside a savepoint -- a unique violation aborts the whole

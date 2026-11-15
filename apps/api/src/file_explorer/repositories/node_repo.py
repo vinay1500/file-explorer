@@ -177,12 +177,6 @@ class NodeRepository:
                 {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
             ).all()
         ]
-        if len(rows) > self._max_depth:
-            log.error(
-                "ancestry walk hit its depth bound; stored data breaks I7",
-                extra={"node_id": node_id, "max_depth": self._max_depth},
-            )
-            raise TreeTooDeep
         return rows
 
     def subtree_height(self, owner_id: int, node_id: int) -> int:
