@@ -28,6 +28,7 @@ from file_explorer.errors import (
     InvalidName,
     InvalidType,
     NodeNotFound,
+    TreeBusy,
     TreeTooDeep,
 )
 from file_explorer.services.tree import TreeService
@@ -582,3 +583,65 @@ def test_the_ancestor_check_refuses_to_answer_from_a_truncated_walk(
     assert deepest is not None
     with pytest.raises(TreeTooDeep):
         svc._repo.is_ancestor_of(alice, root, deepest)
+
+
+@pytest.mark.invariant
+def test_the_chain_coverage_check_rejects_a_stale_lock_set(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """The guard from the M3a BLOCK, asserted directly rather than raced for.
+
+    The concurrency test that found the bug builds a four-transaction
+    interleaving. It is the right test for "can this happen", and it is a poor
+    test for "does the check work" — it depends on lock queue order, and a
+    change in timing turns it into a test of nothing.
+
+    This drives the condition the check exists for: a lock set that does not
+    cover the chain that was then measured. `create` must refuse rather than
+    measure a chain it never locked.
+    """
+    svc = TreeService(session, MAX_DEPTH)
+    root = make_node(alice, "root")
+    middle = make_node(alice, "middle", parent_id=root)
+    session.commit()
+
+    # Exactly what a move committing during the lock wait leaves behind: a set
+    # chosen under an older snapshot, missing the part of the chain that moved.
+    svc._repo.lock_ancestry = lambda owner_id, node_id: [middle]  # type: ignore[method-assign]
+
+    with pytest.raises(TreeBusy):
+        svc.create(alice, middle, "child", "folder")
+    session.rollback()
+
+    assert (
+        session.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 2
+    ), "a node was created against a chain the service never locked"
+
+
+@pytest.mark.invariant
+def test_a_chain_that_keeps_shifting_gives_up_rather_than_spinning(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """Bounded, like every other retry here. A loop that never gives up is a hang.
+
+    503 rather than 409: nothing about the request is wrong, the tree was just
+    being restructured faster than one attempt could finish.
+    """
+    svc = TreeService(session, MAX_DEPTH)
+    root = make_node(alice, "root")
+    session.commit()
+
+    attempts: list[int] = []
+
+    def never_covers(owner_id: int, node_id: int) -> list[int]:
+        attempts.append(node_id)
+        return []
+
+    svc._repo.lock_ancestry = never_covers  # type: ignore[method-assign]
+
+    with pytest.raises(TreeBusy) as caught:
+        svc.create(alice, root, "child", "folder")
+    session.rollback()
+
+    assert caught.value.status == 503
+    assert len(attempts) == 3, f"expected three attempts before giving up, saw {len(attempts)}"

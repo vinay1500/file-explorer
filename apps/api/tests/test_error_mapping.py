@@ -19,7 +19,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
-from file_explorer.errors import DuplicateName, OperationTimedOut, TreeError
+from file_explorer.errors import (
+    CycleDetected,
+    DuplicateName,
+    OperationTimedOut,
+    TreeError,
+)
 from file_explorer.services.tree import RETRYABLE, TIMEOUT, TreeService
 
 MAX_DEPTH = 64
@@ -225,3 +230,18 @@ def test_every_constraint_the_mapping_knows_about_exists(session: Session) -> No
 
     dead = sorted(referenced - actual)
     assert not dead, f"_translate branches on constraints that do not exist: {dead}"
+
+
+@pytest.mark.invariant
+def test_a_self_parent_violation_maps_to_a_cycle(svc: TreeService) -> None:
+    """`ck_nodes_not_own_parent` is I8, and its branch had no test.
+
+    The service catches `node_id == new_parent_id` before the database sees it,
+    so this constraint is a backstop — which is exactly why the mapping needs a
+    test of its own. A backstop that fires is a backstop whose translation has
+    never run in anger.
+    """
+    result = svc._translate(_integrity_error("ck_nodes_not_own_parent"))
+    assert isinstance(result, CycleDetected)
+    assert result.status == 409
+    assert "[SQL:" not in str(result)

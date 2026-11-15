@@ -1,0 +1,172 @@
+"""The health check, the last-resort error handler, and the app wiring.
+
+Coverage found all of these. Not because the number was low -- it was 96% --
+but because the uncovered 4% was the interesting 4%: the health endpoint that
+replaced the one which lied for seventeen months, the handler that decides
+whether an unanticipated bug leaks a stack trace, and the branch that decides
+whether the rate limiter trusts a forwarded address.
+
+That is the argument for measuring coverage rather than trusting a total. A
+well-covered file can still have nothing behind the five lines that matter.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterator
+
+import pytest
+from flask import Flask
+from sqlalchemy.exc import OperationalError
+
+from file_explorer.app import create_app
+from file_explorer.config import Config
+from file_explorer.extensions import db
+
+
+@pytest.fixture
+def wired(app: Flask) -> Iterator[Flask]:
+    """The session app with an actor configured, restored afterwards."""
+    previous = app.config.get("DEV_ACTOR_ID")
+    app.config["DEV_ACTOR_ID"] = 1
+    try:
+        yield app
+    finally:
+        app.config["DEV_ACTOR_ID"] = previous
+
+
+# ----------------------------------------------------------- the health check
+
+
+@pytest.mark.invariant
+def test_health_executes_a_query_rather_than_returning_a_constant(wired: Flask) -> None:
+    """F-24, and the whole of chapter 7.
+
+    The original route returned a constant string. It could not fail while the
+    process was alive, so every uptime signal stayed green for seventeen months
+    while the database was gone.
+
+    This one executes a query. The test that matters is the *next* one -- that
+    it goes red when the database does -- because a health check that only ever
+    answers 200 is indistinguishable from the one it replaced.
+    """
+    response = wired.test_client().get("/api/v1/health")
+    assert response.status_code == 200
+    assert response.get_json() == {"status": "ok", "db": "ok"}
+
+
+@pytest.mark.invariant
+def test_health_reports_degraded_when_the_database_is_unreachable(
+    wired: Flask, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The half that proves the other half means something.
+
+    Without this, `test_health_executes_a_query...` is satisfied by
+    `return {"status": "ok"}`, which is the bug it exists to prevent.
+    """
+
+    def unreachable(*_: object, **__: object) -> None:
+        raise OperationalError("SELECT 1", {}, Exception("could not translate host name"))
+
+    monkeypatch.setattr(db.session, "execute", unreachable)
+
+    with caplog.at_level(logging.ERROR):
+        response = wired.test_client().get("/api/v1/health")
+
+    assert response.status_code == 503
+    assert response.get_json() == {"status": "degraded", "db": "unreachable"}
+
+    # The reason is logged and never returned: it names the database host.
+    assert "could not translate host name" not in response.data.decode()
+    assert any("health check failed" in r.getMessage() for r in caplog.records), (
+        "the failure was answered but never logged, so nothing would notice"
+    )
+
+
+@pytest.mark.invariant
+def test_health_is_not_rate_limited(wired: Flask) -> None:
+    """A limiter that can silence the health check turns a busy minute into an outage."""
+    client = wired.test_client()
+    for _ in range(12):
+        assert client.get("/api/v1/health").status_code in {200, 503}
+
+
+# ------------------------------------------------------- the last resort
+
+
+@pytest.mark.invariant
+def test_an_unexpected_error_inside_a_route_does_not_leak(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The `Exception` handler, which had never run.
+
+    Chapter 11 calls this "the one that decides whether an unanticipated bug
+    leaks a stack trace", and coverage showed nothing had ever reached it. The
+    `after_request` test exercises Flask's `handle_exception` path instead,
+    which resolves to the `HTTPException` handler.
+    """
+    built = create_app(Config)
+    built.config["DEV_ACTOR_ID"] = 1
+
+    @built.get("/api/v1/boom")
+    def _boom() -> str:
+        raise RuntimeError("connection to postgres://user:hunter2@db:5432 failed")
+
+    with caplog.at_level(logging.ERROR):
+        response = built.test_client().get("/api/v1/boom")
+
+    assert response.status_code == 500
+    assert response.content_type.startswith("application/problem+json")
+    body = response.get_json()
+    assert body["code"] == "INTERNAL_ERROR"
+
+    rendered = response.data.decode()
+    assert "hunter2" not in rendered, "the exception message leaked into the response"
+    assert "Traceback" not in rendered
+    assert "RuntimeError" not in rendered
+    assert any("unhandled error" in r.getMessage() for r in caplog.records), (
+        "the error was swallowed without a log line, which is worse than leaking"
+    )
+
+
+# ------------------------------------------------------------- the wiring
+
+
+@pytest.mark.invariant
+def test_a_forwarded_address_is_trusted_only_when_configured() -> None:
+    """`TRUST_PROXY_HOPS` is the difference between two opposite failures.
+
+    Zero and behind a balancer: every caller shares the balancer's address, so
+    the rate limit becomes a global outage switch. Non-zero and *not* behind
+    one: every caller sets their own key through `X-Forwarded-For` and the
+    limit stops existing. Neither is safe to guess, so it is explicit.
+    """
+
+    class Trusting(Config):
+        TRUST_PROXY_HOPS = 1
+
+    assert type(create_app(Config).wsgi_app).__name__ != "ProxyFix"
+    assert type(create_app(Trusting).wsgi_app).__name__ == "ProxyFix", (
+        "TRUST_PROXY_HOPS was set and the forwarded headers are still ignored"
+    )
+
+
+@pytest.mark.invariant
+def test_the_error_response_component_is_retyped_or_says_why(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The retype is silent on success and loud on failure, by design.
+
+    A document that disagrees with the service about the media type is exactly
+    the defect this project shipped once already, and it is invisible unless
+    something says so.
+    """
+    with caplog.at_level(logging.WARNING):
+        built = create_app(Config)
+
+    spec = built.extensions["flask-smorest"]["apis"][""]["ext_obj"].spec.to_dict()
+    default = spec["components"]["responses"]["DEFAULT_ERROR"]
+    assert sorted(default["content"]) == ["application/problem+json"]
+
+    warnings = [r.getMessage() for r in caplog.records if "retype" in r.getMessage()]
+    assert not warnings, f"the retype reported a problem: {warnings}"

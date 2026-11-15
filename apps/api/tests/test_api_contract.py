@@ -14,6 +14,7 @@ quietly stops working. That is F-06, and it is invisible in Python.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Iterator
 
 import pytest
@@ -515,4 +516,52 @@ def test_a_405_carries_allow_and_a_401_carries_www_authenticate(
     assert unauthenticated.headers.get("WWW-Authenticate"), "401 with no WWW-Authenticate"
     assert "DEV_ACTOR_ID" not in unauthenticated.data.decode(), (
         "the 401 told an unauthenticated caller how this service is configured"
+    )
+
+
+@pytest.mark.invariant
+def test_a_body_full_of_unknown_fields_does_not_amplify(client: FlaskClient) -> None:
+    """A small request must not produce a large response.
+
+    The per-key cap bounds each field name and not how many come back, so
+    before the total cap a body with a thousand unknown fields returned a
+    thousand entries. That is the shape of an amplification bug: cheap to
+    send, expensive to answer.
+    """
+    noisy = {f"unknown_{n}": n for n in range(1000)}
+    noisy.update({"name": "home", "type": "folder"})
+
+    response = client.post("/api/v1/nodes", json=noisy)
+    assert response.status_code == 422
+
+    body = response.get_json()
+    reported = body["errors"]
+    flattened = json.dumps(reported)
+    assert len(reported) <= 21, f"{len(reported)} fields echoed back from one request"
+    assert "more" in flattened, "the response did not say it had been truncated"
+    assert len(response.data) < 4096, f"a 1000-field request produced {len(response.data)} bytes"
+
+
+@pytest.mark.invariant
+def test_a_5xx_domain_error_is_logged(
+    client: FlaskClient, session: object, alice: int, make_node: Callable[..., int],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`TreeTooDeep` is a 500 whose own docstring says the alternative is silence.
+
+    It was raised in four places and recorded in none: the domain handler is
+    more specific than the catch-all, so it wins, and it logged nothing.
+    """
+    parent: int | None = None
+    for level in range(70):  # past the 64 cap, built directly
+        parent = make_node(alice, f"L{level}", parent_id=parent)
+    session.commit()  # type: ignore[attr-defined]
+
+    with caplog.at_level(logging.ERROR):
+        response = client.get(f"/api/v1/nodes/{parent}/path")
+
+    assert response.status_code == 500
+    assert response.get_json()["code"] == "TREE_TOO_DEEP"
+    assert any("domain error returned 500" in r.getMessage() for r in caplog.records), (
+        "a 500 was returned and nothing recorded it"
     )
