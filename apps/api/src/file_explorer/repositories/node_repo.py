@@ -167,6 +167,44 @@ _LOCK_ONE = text("""
 """)
 
 
+# Listing, by keyset rather than OFFSET.
+#
+# OFFSET re-walks and discards every row it skips, so page 500 costs 500 pages
+# of work -- and if a row is inserted or deleted while someone pages through,
+# the window shifts underneath them and rows are silently skipped or repeated.
+# Keyset asks for "the rows after this one" in sort order, which is one index
+# seek whatever the page number, and is stable under concurrent writes.
+#
+# COLLATE "C" in BOTH the comparison and the ORDER BY, matching the collation
+# pinned on the indexes in migration 0002. If the comparison and the stored
+# order disagree, keyset skips rows -- and every individual page still looks
+# plausible, which is what makes it so hard to notice.
+#
+# ('', 0) is the first-page sentinel, and it is sound rather than lucky:
+# `ck_nodes_name_not_blank` means no stored name can be empty, so ('', 0) is
+# strictly below every real (name, id). That lets one statement serve the first
+# page and every page after it, instead of two plans that can drift apart.
+_LIST_CHILDREN = text("""
+    SELECT id, parent_id, name, type
+      FROM nodes
+     WHERE owner_id = :owner_id
+       AND parent_id = :parent_id
+       AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+     ORDER BY name COLLATE "C", id
+     LIMIT :limit
+""")
+
+_LIST_ROOTS = text("""
+    SELECT id, parent_id, name, type
+      FROM nodes
+     WHERE owner_id = :owner_id
+       AND parent_id IS NULL
+       AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+     ORDER BY name COLLATE "C", id
+     LIMIT :limit
+""")
+
+
 class NodeRepository:
     def __init__(self, session: Session, max_depth: int) -> None:
         self._s = session
@@ -403,6 +441,39 @@ class NodeRepository:
             {"node_id": node_id, "owner_id": owner_id},
         )
         return cast("CursorResult[Any]", result).rowcount
+
+    def list_children(
+        self, owner_id: int, parent_id: int, limit: int, after: tuple[str, int]
+    ) -> list[NodeRow]:
+        """One page of a folder's children, ordered by `(name, id)` under C."""
+        return [
+            NodeRow(r[0], r[1], r[2], str(r[3]))
+            for r in self._s.execute(
+                _LIST_CHILDREN,
+                {
+                    "owner_id": owner_id,
+                    "parent_id": parent_id,
+                    "after_name": after[0],
+                    "after_id": after[1],
+                    "limit": limit,
+                },
+            ).all()
+        ]
+
+    def list_roots(self, owner_id: int, limit: int, after: tuple[str, int]) -> list[NodeRow]:
+        """One page of an owner's roots, ordered the same way."""
+        return [
+            NodeRow(r[0], r[1], r[2], str(r[3]))
+            for r in self._s.execute(
+                _LIST_ROOTS,
+                {
+                    "owner_id": owner_id,
+                    "after_name": after[0],
+                    "after_id": after[1],
+                    "limit": limit,
+                },
+            ).all()
+        ]
 
     def set_parent(self, owner_id: int, node_id: int, new_parent_id: int | None) -> int:
         """Re-parent one node. Returns rows affected.
