@@ -1,0 +1,282 @@
+"""Name validation, the per-owner ceiling, and the configuration wiring.
+
+Gate 1 recorded two things here. Four configuration values were read by
+nothing, so the service ran on whatever its callers hardcoded. And the only
+name rule was a database check that trims six ASCII whitespace characters —
+which leaves a name made of one non-breaking space, a name carrying a NUL the
+driver cannot send, and a name that renders as a different name.
+
+The last is the one that matters for a file manager, because the entire
+interface is a list of names a person reads and clicks.
+"""
+
+from __future__ import annotations
+
+import unicodedata
+from collections.abc import Callable
+
+import pytest
+from flask import Flask
+from sqlalchemy.orm import Session
+
+from file_explorer.app import create_app, tree_service
+from file_explorer.config import Config, engine_options
+from file_explorer.errors import DuplicateName, InvalidName, QuotaExceeded
+from file_explorer.limits import MAX_NAME_LENGTH
+from file_explorer.names import clean
+from file_explorer.services.tree import TreeService
+
+MAX_DEPTH = 64
+
+
+@pytest.fixture
+def svc(session: Session) -> TreeService:
+    return TreeService(session, MAX_DEPTH)
+
+
+# ------------------------------------------------------- what is rejected
+
+
+@pytest.mark.invariant
+@pytest.mark.parametrize(
+    ("label", "name"),
+    [
+        ("NUL", "doc\x00ument"),
+        ("C0 control", "doc\x01ument"),
+        ("tab is trimmed but not inside", "doc\tument"),
+        ("DEL", "doc\x7fument"),
+        ("C1 control", "doc\x85ument"),
+        ("RTL override", "exe.t‮gpj.txt"),
+        ("LTR override", "doc‭ument"),
+        ("pop directional formatting", "doc‬ument"),
+        ("first strong isolate", "doc⁨ument"),
+        ("pop directional isolate", "doc⁩ument"),
+        ("zero width space", "doc​ument"),
+        ("word joiner", "doc⁠ument"),
+        ("byte order mark", "doc﻿ument"),
+    ],
+)
+def test_names_that_are_rejected(label: str, name: str) -> None:
+    """Controls, directional overrides and pure invisibles.
+
+    The override cases are the Trojan Source set: they reorder how the rest of
+    the string renders, so a name can display as `exe.txt` and be something
+    else. There is no legitimate use for one inside a filename.
+    """
+    with pytest.raises(InvalidName):
+        clean(name)
+
+
+@pytest.mark.invariant
+@pytest.mark.parametrize(
+    ("label", "name"),
+    [
+        ("empty", ""),
+        ("ASCII space", " "),
+        ("non-breaking space", " "),
+        ("ideographic space", "　"),
+        ("ogham space mark", " "),
+        ("mixed whitespace", " \t \n "),
+    ],
+)
+def test_names_that_are_nothing_once_trimmed(label: str, name: str) -> None:
+    """`str.strip()` knows the whole Unicode whitespace class.
+
+    The database check only trims six ASCII characters, so a name of one
+    non-breaking space is storable without this — it looks blank, sorts as
+    though blank, and cannot be typed again.
+    """
+    with pytest.raises(InvalidName):
+        clean(name)
+
+
+@pytest.mark.invariant
+def test_a_name_longer_than_the_column_is_rejected() -> None:
+    assert clean("a" * MAX_NAME_LENGTH) == "a" * MAX_NAME_LENGTH
+    with pytest.raises(InvalidName):
+        clean("a" * (MAX_NAME_LENGTH + 1))
+
+
+@pytest.mark.invariant
+def test_the_length_is_measured_after_normalising() -> None:
+    """NFC composes, so it can shorten a string below the limit.
+
+    Measuring first would reject a name that fits once stored.
+    """
+    # Written as escapes, not as literal combining marks. The two spellings are
+    # indistinguishable in a diff, a terminal and a code review, which is the
+    # whole problem this test is about -- so the source says which is which.
+    decomposed = "e\u0301" * MAX_NAME_LENGTH  # 510 code points, 255 after NFC
+    assert len(decomposed) == MAX_NAME_LENGTH * 2
+    assert len(clean(decomposed)) == MAX_NAME_LENGTH
+
+
+@pytest.mark.invariant
+def test_a_non_string_is_rejected_rather_than_coerced() -> None:
+    for value in (None, 42, ["name"], {"name": "x"}):
+        with pytest.raises(InvalidName):
+            clean(value)
+
+
+# -------------------------------------------------------- what is allowed
+
+
+@pytest.mark.invariant
+@pytest.mark.parametrize(
+    ("label", "name"),
+    [
+        ("zero width non-joiner", "می‌خواهم"),
+        ("zero width joiner", "क्‍ष"),
+        ("left-to-right mark", "file‎.txt"),
+        ("right-to-left mark", "קובץ‏.txt"),
+        ("emoji", "holiday \U0001f334.jpg"),
+        ("CJK", "年度報告.pdf"),
+        ("inner spaces", "quarterly report 2026.pdf"),
+    ],
+)
+def test_names_that_must_keep_working(label: str, name: str) -> None:
+    """The deliberate holes in the deny-list, each for a reason.
+
+    ZWNJ and ZWJ are the difference between two spellings in Persian and
+    several Indic scripts, not decoration. LRM and RLM resolve direction for a
+    neighbouring character rather than reordering the string. Banning them
+    would make ordinary names in those languages unrepresentable, which is a
+    worse failure than the narrow spoofing they allow.
+    """
+    assert clean(name) == unicodedata.normalize("NFC", name)
+
+
+@pytest.mark.invariant
+def test_surrounding_whitespace_is_trimmed_not_rejected(svc: TreeService, alice: int) -> None:
+    assert clean("  report.pdf  ") == "report.pdf"
+    assert svc.create(alice, None, "  spaced  ", "folder")
+    assert [str(r["name"]) for r in svc.list_roots(alice)[0]] == ["spaced"]
+
+
+# --------------------------------------------------- why NFC is the point
+
+
+@pytest.mark.invariant
+def test_two_spellings_of_one_name_collide_instead_of_coexisting(
+    svc: TreeService, alice: int
+) -> None:
+    """The payoff for normalising at the edge.
+
+    `café` precomposed and `café` decomposed are different byte strings that
+    render identically. Stored raw they become two siblings nobody can tell
+    apart — and the unique index cannot help, because it compares stored bytes.
+    Normalising before the insert is what makes the second one a 409.
+    """
+    home = svc.create(alice, None, "home", "folder")
+    precomposed = "caf\u00e9"  # LATIN SMALL LETTER E WITH ACUTE
+    decomposed = "cafe\u0301"  # e + COMBINING ACUTE ACCENT
+    assert precomposed != decomposed
+
+    svc.create(alice, home, precomposed, "folder")
+    with pytest.raises(DuplicateName):
+        svc.create(alice, home, decomposed, "folder")
+
+
+@pytest.mark.invariant
+def test_rename_normalises_too(svc: TreeService, alice: int) -> None:
+    """Both write paths, or the second one reintroduces what the first prevents."""
+    home = svc.create(alice, None, "home", "folder")
+    svc.create(alice, home, "café", "folder")
+    other = svc.create(alice, home, "other", "folder")
+
+    with pytest.raises(DuplicateName):
+        svc.rename(alice, other, "café")
+
+
+@pytest.mark.invariant
+def test_a_rejected_name_never_reaches_the_driver(svc: TreeService, alice: int) -> None:
+    """NUL is the sharp case: PostgreSQL text cannot hold it at all.
+
+    Without the check it surfaces as a driver `ValueError` from deep inside
+    psycopg — not an `IntegrityError`, so `_translate` would never see it and
+    it would escape as a 500 carrying a stack trace.
+    """
+    with pytest.raises(InvalidName):
+        svc.create(alice, None, "doc\x00ument", "folder")
+
+
+# ------------------------------------------------------------- the quota
+
+
+@pytest.mark.invariant
+def test_the_per_owner_ceiling_is_enforced(session: Session, alice: int) -> None:
+    svc = TreeService(session, MAX_DEPTH, max_nodes=3)
+    for n in range(3):
+        svc.create(alice, None, f"root-{n}", "folder")
+
+    with pytest.raises(QuotaExceeded):
+        svc.create(alice, None, "one-too-many", "folder")
+
+
+@pytest.mark.invariant
+def test_the_ceiling_is_per_owner_not_global(
+    session: Session, alice: int, bob: int, make_node: Callable[..., int]
+) -> None:
+    svc = TreeService(session, MAX_DEPTH, max_nodes=2)
+    for n in range(2):
+        make_node(bob, f"theirs-{n}")
+    session.commit()
+
+    svc.create(alice, None, "mine", "folder")  # bob's two must not count here
+
+
+# ----------------------------------------------------- the config wiring
+
+
+@pytest.mark.invariant
+def test_the_service_takes_its_bounds_from_configuration(app: Flask) -> None:
+    """Gate 1's "four config values are read by nothing", closed.
+
+    Built through the factory rather than by hand, because by hand is exactly
+    how the values stayed unread.
+    """
+    with app.app_context():
+        app.config["MAX_TREE_DEPTH"] = 7
+        app.config["MAX_NODES_PER_USER"] = 11
+        built = tree_service()
+
+    assert built._max_depth == 7, "MAX_TREE_DEPTH did not reach the service"
+    assert built._max_nodes == 11, "MAX_NODES_PER_USER did not reach the service"
+
+
+@pytest.mark.invariant
+def test_the_timeouts_reach_the_connection() -> None:
+    """The values and the connection string cannot drift apart.
+
+    They did: `SQLALCHEMY_ENGINE_OPTIONS` re-read `os.environ` rather than the
+    constants directly above it, so setting one in code changed the number and
+    not the connection.
+    """
+    options = engine_options(
+        {
+            "POOL_SIZE": 1,
+            "MAX_OVERFLOW": 0,
+            "STATEMENT_TIMEOUT_MS": 1234,
+            "LOCK_TIMEOUT_MS": 567,
+            "IDLE_IN_TRANSACTION_TIMEOUT_MS": 8910,
+        }
+    )
+    connect = str(options["connect_args"])
+    assert "statement_timeout=1234" in connect
+    assert "lock_timeout=567" in connect
+    assert "idle_in_transaction_session_timeout=8910" in connect
+
+
+@pytest.mark.invariant
+def test_overriding_a_timeout_changes_the_connection() -> None:
+    """A class attribute would freeze at import and this would not hold."""
+
+    class Tight(Config):
+        STATEMENT_TIMEOUT_MS = 4321
+
+    built = create_app(Tight)
+    options = built.config["SQLALCHEMY_ENGINE_OPTIONS"]
+    assert "statement_timeout=4321" in str(options["connect_args"]), (
+        "the engine options were built before the override, so configuration "
+        "that looks wired is not"
+    )

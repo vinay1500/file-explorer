@@ -475,6 +475,21 @@ class NodeRepository:
             ).all()
         ]
 
+    def count_for_owner(self, owner_id: int) -> int:
+        """How many nodes this owner holds.
+
+        A plain count, which is honest about its cost: it scans the owner's
+        slice of `ix_nodes_owner_parent`. At the 50,000 ceiling that is cheap;
+        it would not be at ten million, and the answer then is a counter row
+        rather than a faster count.
+        """
+        return int(
+            self._s.execute(
+                text("SELECT count(*) FROM nodes WHERE owner_id = :owner_id"),
+                {"owner_id": owner_id},
+            ).scalar_one()
+        )
+
     def set_parent(self, owner_id: int, node_id: int, new_parent_id: int | None) -> int:
         """Re-parent one node. Returns rows affected.
 

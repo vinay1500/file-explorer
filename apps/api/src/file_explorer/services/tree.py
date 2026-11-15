@@ -28,8 +28,11 @@ from file_explorer.errors import (
     InvalidType,
     NodeNotFound,
     OperationTimedOut,
+    QuotaExceeded,
     StorageError,
 )
+from file_explorer.limits import DEFAULT_PAGE, MAX_NODES_PER_USER, MAX_PAGE
+from file_explorer.names import clean
 from file_explorer.repositories.node_repo import NodeRepository, NodeRow
 
 log = logging.getLogger(__name__)
@@ -66,9 +69,6 @@ _T = TypeVar("_T")
 Cursor = tuple[str, int] | None
 Page = tuple[list[dict[str, object]], Cursor]
 
-DEFAULT_PAGE = 50
-MAX_PAGE = 200
-
 # ('', 0) sorts below every stored (name, id): `ck_nodes_name_not_blank`
 # guarantees no name is empty, and the empty string is first in byte order.
 _FIRST_PAGE: tuple[str, int] = ("", 0)
@@ -99,10 +99,13 @@ def _constraint_of(exc: IntegrityError) -> str:
 
 
 class TreeService:
-    def __init__(self, session: Session, max_depth: int) -> None:
+    def __init__(
+        self, session: Session, max_depth: int, max_nodes: int = MAX_NODES_PER_USER
+    ) -> None:
         self._s = session
         self._repo = NodeRepository(session, max_depth)
         self._max_depth = max_depth
+        self._max_nodes = max_nodes
 
     # ---------------------------------------------------------------- retry
 
@@ -262,6 +265,23 @@ class TreeService:
         if node_type not in NODE_TYPES:
             raise InvalidType
 
+        # Normalise before anything else. What is stored is the cleaned form,
+        # because the uniqueness indexes compare stored bytes -- so this is
+        # what stops `café` and `cafe` + a combining accent becoming two
+        # siblings nobody can tell apart.
+        name = clean(name)
+
+        # One account must not be able to fill the database. Checked here
+        # rather than by a constraint, which would have to serialise every
+        # insert for this owner to count them.
+        #
+        # Two concurrent creates can both pass this, so the ceiling is soft by
+        # the number of requests in flight. A hard one costs a per-owner
+        # counter row that every create must lock, which is a worse trade for
+        # a limit that exists to stop scripts rather than to bill anyone.
+        if self._repo.count_for_owner(actor_id) >= self._max_nodes:
+            raise QuotaExceeded
+
         level = 0
         if parent_id is not None:
             # 1. Resolve with a plain read, scoped by owner. Same reasoning as
@@ -325,6 +345,8 @@ class TreeService:
         self._with_retry("rename", node_id, lambda: self._rename_once(actor_id, node_id, new_name))
 
     def _rename_once(self, actor_id: int, node_id: int, new_name: str) -> None:
+        new_name = clean(new_name)
+
         node = self._repo.get(actor_id, node_id)
         if node is None:
             raise NodeNotFound
