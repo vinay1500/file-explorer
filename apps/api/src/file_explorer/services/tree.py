@@ -527,6 +527,8 @@ class TreeService:
         parent = self._repo.get(actor_id, parent_id)
         if parent is None:
             raise NodeNotFound
+        if parent.type == "file":
+            raise FileAsParent
         rows = self._repo.list_children(actor_id, parent_id, _fetch(limit), _start(after))
         return self._page(rows, limit)
 

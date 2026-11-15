@@ -45,7 +45,7 @@ from file_explorer.limits import MAX_NAME_LENGTH
 #   Zl  LINE SEPARATOR, Zp PARAGRAPH SEPARATOR. `str.strip()` removes these at
 #       the edges and not in the middle, where they do exactly what the control
 #       characters do.
-REJECTED_CATEGORIES = frozenset({"Cc"})  # MUTATION: back to controls only
+REJECTED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
 
 # Allowed back in, each for a reason.
 #
