@@ -439,7 +439,10 @@ class TreeService:
         wanted = _clamp(limit)
         has_more = len(rows) > wanted
         rows = rows[:wanted]
-        items = [
+        # Annotated rather than inferred: a dict literal of mixed value types
+        # infers dict[str, str | int | None], and dict's value type is
+        # invariant, so that is not a dict[str, object].
+        items: list[dict[str, object]] = [
             {"id": r.id, "parent_id": r.parent_id, "name": r.name, "type": r.type} for r in rows
         ]
         cursor = (rows[-1].name, rows[-1].id) if has_more and rows else None
