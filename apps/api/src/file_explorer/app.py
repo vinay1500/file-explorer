@@ -153,7 +153,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     problems.register(app)
 
     @app.get("/api/v1/health")
-        def health() -> tuple[dict[str, str], int]:
+    def health() -> tuple[dict[str, str], int]:
         """Readiness, not liveness.
 
         The original service had a route that returned a constant string. It
