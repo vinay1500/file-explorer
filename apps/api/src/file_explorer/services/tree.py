@@ -29,6 +29,7 @@ from file_explorer.errors import (
     NodeNotFound,
     OperationTimedOut,
     QuotaExceeded,
+    TreeBusy,
     StorageError,
 )
 from file_explorer.limits import DEFAULT_PAGE, MAX_NODES_PER_USER, MAX_PAGE
@@ -61,6 +62,16 @@ _MAX_ATTEMPTS = 3
 NODE_TYPES = frozenset({"file", "folder"})
 
 _T = TypeVar("_T")
+
+
+class _ChainShifted(Exception):
+    """The ancestry moved between taking the lock and measuring it.
+
+    Internal to this module. `_with_retry` treats it exactly like a contention
+    sqlstate, because that is what it is -- the difference is only that
+    PostgreSQL reported this one by giving us a lock on rows that had stopped
+    being the chain we needed.
+    """
 
 # A page cursor is the (name, id) of the last row the caller saw. It is the sort
 # key itself, not an encoded offset, which is what makes it stable while other
@@ -125,6 +136,16 @@ class TreeService:
         for attempt in range(1, _MAX_ATTEMPTS + 1):
             try:
                 return run()
+            except _ChainShifted:
+                self._s.rollback()
+                if attempt == _MAX_ATTEMPTS:
+                    raise TreeBusy from None
+                log.warning(
+                    "ancestry shifted under %s, retrying",
+                    what,
+                    extra={"attempt": attempt, "op": what, "node_id": node_id},
+                )
+                time.sleep(0.02 * attempt + random.uniform(0, 0.02))
             except DBAPIError as exc:
                 sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
                 if sqlstate == TIMEOUT:
@@ -229,9 +250,16 @@ class TreeService:
         # ancestry() returns the destination itself plus its ancestors, so its
         # length IS the destination's level, counting the root as level 1. A
         # move to the root has no destination row, hence level 0.
-        dest_level = (
-            0 if new_parent_id is None else len(self._repo.ancestry(actor_id, new_parent_id))
-        )
+        dest_level = 0
+        if new_parent_id is not None:
+            chain = self._repo.ancestry(actor_id, new_parent_id)
+            # Same snapshot mismatch as `create` step 3a, and the same reason.
+            # `lock_move_participants` picked its rows under an older snapshot
+            # than this walk, so an ancestor added since is unlocked and can be
+            # moved deeper before the UPDATE below commits.
+            if not {row[0] for row in chain} <= set(locked):
+                raise _ChainShifted
+            dest_level = len(chain)
         height = self._repo.subtree_height(actor_id, node_id)
         deepest_after_move = dest_level + 1 + height
         if deepest_after_move > self._max_depth:
@@ -312,7 +340,25 @@ class TreeService:
             #
             #    `ancestry` returns the parent plus its ancestors, so its
             #    length IS the parent's level, counting the root as level 1.
-            level = len(self._repo.ancestry(actor_id, parent_id))
+            chain = self._repo.ancestry(actor_id, parent_id)
+
+            # 3a. The two statements used two snapshots, so check they agree.
+            #
+            #     Step 2 chose WHICH rows to lock from a CTE under its own
+            #     snapshot, and `LockRows` sits above that plan -- it does not
+            #     re-run the CTE after a lock wait. If an ancestor was
+            #     re-parented while we waited, we now hold locks on a chain
+            #     that no longer exists while measuring one that does, and the
+            #     part we never locked is free for another move to push deeper
+            #     before our insert lands.
+            #
+            #     Holding every row we measured is what makes the measurement
+            #     stable: a move of any of them has to take `FOR NO KEY UPDATE`
+            #     on the row it moves, which we are holding.
+            if not {row[0] for row in chain} <= set(locked):
+                raise _ChainShifted
+
+            level = len(chain)
 
         # 4. The new node sits one below its parent.
         if level + 1 > self._max_depth:
