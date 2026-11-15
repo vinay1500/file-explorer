@@ -321,32 +321,30 @@ class NodeRepository:
         the rows the lock query returned -- the obvious optimisation -- lets two
         moves across separate trees commit a 4-cycle.
         """
-        found, deepest = (
-            self._s.execute(
-                text("""
-                WITH RECURSIVE ancestry AS (
-                    SELECT id, parent_id, 0 AS depth
-                      FROM nodes
-                     WHERE id = :node_id
-                       AND owner_id = :owner_id
-                    UNION ALL
-                    SELECT n.id, n.parent_id, a.depth + 1
-                      FROM nodes n
-                      JOIN ancestry a ON n.id = a.parent_id
-                     WHERE n.owner_id = :owner_id
-                       AND a.depth < :max_depth
-                )
-                SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id) AS found,
-                       COALESCE((SELECT max(depth) FROM ancestry), 0) AS deepest
-                """),
-                {
-                    "node_id": node_id,
-                    "candidate_id": candidate_id,
-                    "owner_id": owner_id,
-                    "max_depth": self._max_depth,
-                },
-            ).one()
-        )
+        found, deepest = self._s.execute(
+            text("""
+            WITH RECURSIVE ancestry AS (
+                SELECT id, parent_id, 0 AS depth
+                  FROM nodes
+                 WHERE id = :node_id
+                   AND owner_id = :owner_id
+                UNION ALL
+                SELECT n.id, n.parent_id, a.depth + 1
+                  FROM nodes n
+                  JOIN ancestry a ON n.id = a.parent_id
+                 WHERE n.owner_id = :owner_id
+                   AND a.depth < :max_depth
+            )
+            SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id) AS found,
+                   COALESCE((SELECT max(depth) FROM ancestry), 0) AS deepest
+            """),
+            {
+                "node_id": node_id,
+                "candidate_id": candidate_id,
+                "owner_id": owner_id,
+                "max_depth": self._max_depth,
+            },
+        ).one()
         # The one bounded walk that used to have no truncation check. A
         # truncated ancestry here answers "no, not an ancestor" for a node that
         # is one -- which is the cycle check failing open, the exact failure the
