@@ -6,6 +6,13 @@ trees. If one ever needs to, the rule is in the wrong place -- the service is
 what the concurrency tests exercise, and a rule that lives up here is a rule
 those tests cannot reach.
 
+`unknown=RAISE` on the query arguments is not decoration. webargs overrides a
+schema's own `Meta.unknown` with a per-location default, and the default for
+the query string is `EXCLUDE` -- so the strict base class does nothing there
+and `?cursr=...` is silently dropped. A dropped cursor is not a cosmetic bug:
+the listing restarts from page one every time, so a client paging through
+loops forever and the server answers every request successfully.
+
 **Why `/roots` is its own route** rather than `GET /nodes?parent_id=`. A root
 has `parent_id` of `null`, and `null` is not something a query string can
 carry: `?parent_id=` is an empty string, which a typed schema rejects with 422,
@@ -19,6 +26,7 @@ from typing import Any
 
 from flask.views import MethodView
 from flask_smorest import Blueprint
+from marshmallow import RAISE
 
 from file_explorer import cursors
 from file_explorer.app import tree_service
@@ -63,9 +71,10 @@ def _page(result: tuple[list[dict[str, object]], tuple[str, int] | None]) -> dic
 
 @blp.route("/roots")
 class Roots(MethodView):
-    @blp.arguments(PageQuerySchema, location="query")
+    @blp.arguments(PageQuerySchema, location="query", unknown=RAISE)
     @blp.response(200, PageSchema)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def get(self, query: dict[str, Any]) -> dict[str, Any]:
         """One page of the caller's root folders and files."""
@@ -85,6 +94,7 @@ class Nodes(MethodView):
     @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def post(self, body: dict[str, Any]) -> dict[str, Any]:
         """Create a folder or a file. `parent_id` of null creates a root."""
@@ -102,6 +112,7 @@ class Node(MethodView):
     @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def patch(self, body: dict[str, Any], node_id: int) -> dict[str, Any]:
         """Rename a node in place."""
@@ -113,6 +124,7 @@ class Node(MethodView):
 
     @blp.response(200, DeletedSchema)
     @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def delete(self, node_id: int) -> dict[str, Any]:
         """Delete a node and everything under it."""
@@ -125,11 +137,12 @@ class Node(MethodView):
 
 @blp.route("/nodes/<int:node_id>/children")
 class Children(MethodView):
-    @blp.arguments(PageQuerySchema, location="query")
+    @blp.arguments(PageQuerySchema, location="query", unknown=RAISE)
     @blp.response(200, PageSchema)
     @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def get(self, query: dict[str, Any], node_id: int) -> dict[str, Any]:
         """One page of a folder's contents. A file is a 409, not an empty page."""
@@ -148,6 +161,7 @@ class Children(MethodView):
 class Path(MethodView):
     @blp.response(200, PathSchema)
     @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def get(self, node_id: int) -> dict[str, Any]:
         """Breadcrumbs, root first."""

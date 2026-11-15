@@ -14,6 +14,7 @@ from flask.wrappers import Response
 from flask_smorest import Api
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from file_explorer import problems
 from file_explorer.config import Config, engine_options
@@ -92,6 +93,14 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # imported, which produces an empty migration and a confusing failure later.
     from file_explorer import models  # noqa: F401
 
+    hops = app.config.get("TRUST_PROXY_HOPS", 0)
+    if hops:
+        # Only when told. Trusting X-Forwarded-For with nothing in front means
+        # every caller chooses their own rate-limit key.
+        app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
+            app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops
+        )
+
     limiter.init_app(app)
 
     # `ERROR_SCHEMA` registers the Problem component itself, so registering it
@@ -115,6 +124,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     problems.register(app)
 
     @app.get("/api/v1/health")
+    @limiter.exempt
     def health() -> tuple[dict[str, str], int]:
         """Readiness, not liveness.
 

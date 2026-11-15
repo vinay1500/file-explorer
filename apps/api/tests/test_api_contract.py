@@ -19,12 +19,10 @@ from collections.abc import Callable, Iterator
 import pytest
 from flask import Flask, request
 from flask.testing import FlaskClient
+from sqlalchemy import text
 
 from file_explorer.app import create_app
 from file_explorer.config import Config
-
-ACTOR_HEADERS: dict[str, str] = {}
-
 
 @pytest.fixture
 def client(app: Flask, alice: int, session: object) -> Iterator[FlaskClient]:
@@ -404,3 +402,106 @@ def test_a_failure_after_the_handler_is_still_a_problem_document() -> None:
     rendered = response.data.decode()
     assert "Traceback" not in rendered
     assert "/srv/secret/path" not in rendered, "the exception message leaked"
+
+
+# ------------------------------------------------------------- isolation
+
+
+@pytest.mark.invariant
+def test_no_route_reaches_another_owners_node(
+    client: FlaskClient, session: object, bob: int, make_node: Callable[..., int]
+) -> None:
+    """The HTTP layer's whole isolation story, which nothing else tested.
+
+    Review was blunt about why: `alice` is always id 1 under `RESTART
+    IDENTITY`, so every other assertion in this file still holds if
+    `require_actor()` were replaced with `return 1`, or if a route passed a
+    literal `1` to the service instead of `actor`.
+
+    This builds a node that belongs to **bob** and drives every route as
+    alice. 404 on all of them -- never 403, which would confirm the row exists
+    and make sequential ids enumerable, and never 200.
+    """
+    theirs = make_node(bob, "bob-private")
+    make_node(bob, "bob-child", parent_id=theirs)
+    session.commit()  # type: ignore[attr-defined]
+
+    attempts = {
+        "GET children": client.get(f"/api/v1/nodes/{theirs}/children"),
+        "GET path": client.get(f"/api/v1/nodes/{theirs}/path"),
+        "PATCH rename": client.patch(f"/api/v1/nodes/{theirs}", json={"name": "mine-now"}),
+        "POST move": client.post(f"/api/v1/nodes/{theirs}/move", json={"new_parent_id": None}),
+        "DELETE": client.delete(f"/api/v1/nodes/{theirs}"),
+        "POST create under": client.post(
+            "/api/v1/nodes", json={"name": "smuggled", "type": "folder", "parent_id": theirs}
+        ),
+    }
+
+    wrong = {
+        label: response.status_code
+        for label, response in attempts.items()
+        if response.status_code != 404
+    }
+    assert not wrong, f"routes that did not answer 404 for another owner's node: {wrong}"
+
+    for label, response in attempts.items():
+        assert "bob-private" not in response.data.decode(), f"{label} echoed the name"
+
+    session.rollback()  # type: ignore[attr-defined]
+    remaining = session.execute(  # type: ignore[attr-defined]
+        text("SELECT count(*) FROM nodes WHERE owner_id = :o"), {"o": bob}
+    ).scalar_one()
+    assert remaining == 2, f"bob's subtree was modified: {remaining} of 2 rows left"
+
+
+@pytest.mark.invariant
+def test_a_listing_shows_only_the_caller(
+    client: FlaskClient, session: object, bob: int, make_node: Callable[..., int]
+) -> None:
+    make_node(bob, "theirs")
+    session.commit()  # type: ignore[attr-defined]
+    client.post("/api/v1/nodes", json={"name": "mine", "type": "folder", "parent_id": None})
+
+    page = _problem(client.get("/api/v1/roots"))
+    assert [item["name"] for item in page["items"]] == ["mine"]  # type: ignore[union-attr]
+
+
+@pytest.mark.invariant
+def test_an_unknown_query_parameter_is_rejected(client: FlaskClient) -> None:
+    """webargs overrides the schema's own `unknown`, and its query default is EXCLUDE.
+
+    So the strict base class did nothing here and `?cursr=` was silently
+    dropped — which is not cosmetic. A dropped cursor restarts the listing at
+    page one, so a client paging through loops forever while every single
+    request succeeds.
+    """
+    response = client.get("/api/v1/roots?cursr=abc")
+    assert response.status_code == 422, (
+        f"an unknown query parameter was accepted ({response.status_code}); "
+        "a dropped cursor is an infinite pagination loop"
+    )
+    assert "cursr" in response.data.decode()
+
+
+@pytest.mark.invariant
+def test_a_405_carries_allow_and_a_401_carries_www_authenticate(
+    client: FlaskClient, app: Flask
+) -> None:
+    """Both are RFC 9110 MUSTs, and building a fresh response drops them."""
+    wrong_method = client.delete("/api/v1/roots")
+    assert wrong_method.status_code == 405
+    assert wrong_method.headers.get("Allow"), "405 with no Allow header"
+
+    previous = app.config.get("DEV_ACTOR_ID")
+    app.config["DEV_ACTOR_ID"] = None
+    try:
+        with app.test_client() as anonymous:
+            unauthenticated = anonymous.get("/api/v1/roots")
+    finally:
+        app.config["DEV_ACTOR_ID"] = previous
+
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.headers.get("WWW-Authenticate"), "401 with no WWW-Authenticate"
+    assert "DEV_ACTOR_ID" not in unauthenticated.data.decode(), (
+        "the 401 told an unauthenticated caller how this service is configured"
+    )

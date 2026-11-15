@@ -74,6 +74,19 @@ class Config:
     # the effective limit is this times the worker count, and a restart clears
     # it. That is honest for a single free-tier instance and wrong anywhere
     # else; RATELIMIT_STORAGE_URI points at Redis when there is one.
+    # How many proxies sit in front of this app. 0 means none, and
+    # `remote_addr` is the caller.
+    #
+    # It matters because the rate limiter keys on `remote_addr`. Behind a load
+    # balancer without ProxyFix that is the *balancer's* address, so every
+    # caller in the world shares one bucket and the limit becomes a global
+    # outage switch. With ProxyFix and no balancer, the caller sets their own
+    # key through `X-Forwarded-For` and the limit stops existing.
+    #
+    # There is no safe default, so this is explicit and defaults to 0. Set it
+    # to the real number of hops; do not guess high.
+    TRUST_PROXY_HOPS = int(os.environ.get("TRUST_PROXY_HOPS", "0"))
+
     RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "120 per minute")
     RATELIMIT_HEADERS_ENABLED = True

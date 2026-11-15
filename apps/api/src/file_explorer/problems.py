@@ -54,6 +54,7 @@ def _problem(
     title: str,
     detail: str | None = None,
     errors: dict[str, Any] | None = None,
+    source: HTTPException | None = None,
 ) -> tuple[Response, int]:
     body: dict[str, Any] = {
         "type": f"{TYPE_BASE}#{code.lower()}",
@@ -70,6 +71,18 @@ def _problem(
     response = jsonify(body)
     response.status_code = status
     response.content_type = PROBLEM_CONTENT_TYPE
+
+    # Carry over the headers the exception came with. Building a fresh response
+    # drops them, and two of them are RFC 9110 MUSTs: `Allow` on a 405 and
+    # `WWW-Authenticate` on a 401. Werkzeug sets both; throwing them away makes
+    # the response non-conforming in a way nothing in the body shows.
+    #
+    # Content-Type and Content-Length are excluded: those describe the
+    # exception's own HTML body, which is not what is being sent.
+    if source is not None:
+        for key, value in source.get_headers():
+            if key.lower() not in {"content-type", "content-length"}:
+                response.headers.setdefault(key, value)
     # Error bodies say something about the caller's own tree, so they must not
     # be cached by anything in front of this service.
     response.headers["Cache-Control"] = "no-store"
@@ -88,9 +101,15 @@ def register(app: Flask) -> None:
 
     @app.errorhandler(TreeError)
     def _domain(exc: TreeError) -> tuple[Response, int]:
-        # `detail` is the class's own title, never the submitted value. A
-        # duplicate-name response that echoes the name tells anyone who can see
-        # the response what is already in that folder.
+        # 5xx domain errors are logged here. This handler is more specific than
+        # the `Exception` one, so it wins -- and `TreeTooDeep`, whose own
+        # docstring says "the alternative is silence", was being answered as a
+        # 500 and recorded nowhere.
+        if exc.status >= 500:
+            log.exception("domain error returned %s", exc.status, extra={"code": exc.code})
+        # The problem carries the class's own title and never the submitted
+        # value. A duplicate-name response that echoes the name tells anyone
+        # who can see it what is already in that folder.
         return _problem(exc.status, exc.code, exc.title)
 
     @app.errorhandler(ValidationError)
@@ -125,6 +144,7 @@ def register(app: Flask) -> None:
             exc.name,
             detail,
             _truncate_keys(errors) if errors else None,
+            source=exc,
         )
 
     @app.errorhandler(Exception)

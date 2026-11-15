@@ -74,8 +74,16 @@ class NodeMoveSchema(_Strict):
 
 
 class PageQuerySchema(_Strict):
-    limit = fields.Integer(load_default=None, validate=validate.Range(min=1, max=MAX_PAGE))
-    cursor = fields.String(load_default=None, allow_none=True)
+    """Pagination inputs.
+
+    Neither field uses `load_default=None`. That spelling documents them as
+    `nullable: true` with a default of `null` while `?limit=` and `?cursor=`
+    are both 422 -- so the document invites exactly the request the service
+    rejects. Omitted simply means absent, which is what the routes check.
+    """
+
+    limit = fields.Integer(validate=validate.Range(min=1, max=MAX_PAGE))
+    cursor = fields.String()
 
 
 class PageSchema(_Strict):

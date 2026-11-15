@@ -30,8 +30,15 @@ def require_actor() -> int:
     """
     actor = current_app.config.get("DEV_ACTOR_ID")
     if actor is None:
+        # RFC 9110 requires a 401 to carry WWW-Authenticate. The scheme named
+        # here is the one M5 will use, so a client that follows the challenge
+        # today is already pointed at the right mechanism.
+        #
+        # The description says nothing about how this service is configured.
+        # The earlier one named the missing setting, which told an
+        # unauthenticated caller about the deployment's auth posture.
         raise Unauthorized(
-            "No actor is configured. Set DEV_ACTOR_ID, or wait for real "
-            "authentication, but do not run this open."
+            "Authentication is required.",
+            www_authenticate='Bearer realm="file-explorer"',
         )
     return int(actor)
