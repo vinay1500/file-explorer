@@ -113,8 +113,13 @@ attached under a parent belonging to a different user — and then that user del
 would cascade straight into someone else's subtree. Silent cross-tenant destruction.
 
 Referencing the `(id, owner_id)` pair makes a cross-owner parent a foreign-key violation,
-whatever the application layer forgets. `MATCH SIMPLE` — the default — skips the check when any
-column is `NULL`, which is exactly the behaviour a root node needs.
+whatever the application layer forgets.
+
+**Its limit is worth stating plainly.** `MATCH SIMPLE` — the default — skips the check when any
+column is `NULL`, and `parent_id IS NULL` on a root. So this constrains every node that *has* a
+parent, and constrains a root's owner **not at all**. No constraint can: the database does not
+know which user is making the request. A root's owner is a service-layer guarantee and only
+that, and describing this key as making cross-owner data impossible was an overstatement.
 
 The `UNIQUE (id, owner_id)` is redundant against the primary key and exists only because a
 foreign key needs a unique index on the columns it references. That is the price of the pattern,

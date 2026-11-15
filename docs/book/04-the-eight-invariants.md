@@ -76,6 +76,111 @@ matters less than the fact that one exists.
 
 ---
 
+## I7 is not really about depth
+
+The chapter above argues I7 on denial-of-service grounds, and that argument stands. It is also
+not the important one.
+
+Both recursive walks are bounded at `max_depth` — they have to be, or a cycle in the data makes
+the cycle detector the first casualty of the cycle it exists to detect. But a bounded walk does
+not fail when the chain is longer than the bound. **It stops and returns what it has.**
+
+So on a tree one level over the cap, `ancestry` returns a partial chain that is indistinguishable
+from a complete one. Hand that to the cycle check and it misses an ancestor that is genuinely
+there, answers "no cycle", and allows the move.
+
+**I7 is what keeps I1 sound.** Lose the cap and the cycle check quietly starts failing open.
+
+That changes where the cap has to be enforced. It is not enough to check it on `move`, which is
+where it started: `create` has to check it too, and `create` has to take the measurement while
+holding `FOR NO KEY UPDATE` on the parent's chain — otherwise a concurrent move deepens that
+chain between the measurement and the insert, and the new node lands past the cap anyway. Full
+argument in [chapter 9](09-recursive-ctes.md).
+
+The walks also now report truncation rather than hiding it. `TreeTooDeep` is a 500 and is
+deliberately a different error from `DepthExceeded`, which is the 409 for an operation that
+*would* break I7. One says "you cannot do that"; the other says "this tree is already wrong and
+I will not guess."
+
+---
+
+## The name rules, which are not invariants but belong here
+
+Eight invariants describe the *shape* of the tree. None of them says anything about what a name
+may contain, and the database check only guarantees a name is not blank once six ASCII whitespace
+characters are trimmed. That leaves a surprising amount.
+
+| What | Why it matters |
+|---|---|
+| `NUL` (U+0000) | PostgreSQL text cannot hold it. Without a check it surfaces as a driver `ValueError` from inside psycopg — not an `IntegrityError`, so `_translate` never sees it and it escapes as a 500. |
+| C0, C1 and `DEL` | Break terminals and logs, and make a name that cannot be typed back. |
+| Directional overrides and isolates | The Trojan Source set. They reorder how the rest of the string renders, so a name can display as `report.txt` and be something else. |
+| Zero-width space, word joiner, BOM | Invisible in every font, so two different names look identical and a person cannot tell which they are clicking. |
+| A name of one non-breaking space | Passes the database check, looks blank, sorts as though blank, and cannot be typed again. |
+| `café` two ways | Precomposed and decomposed are different byte strings that render identically. Stored raw they become two siblings nobody can distinguish — and the unique index cannot help, because it compares stored bytes. |
+
+The last one is why names are **NFC-normalised before storing**, in both write paths. Normalising
+at the edge is what turns a look-alike into a 409.
+
+### A list, then a rule
+
+The first version of this enumerated three invisible characters. Review took about a minute to
+find eight more walking straight past it: `U+00AD` SOFT HYPHEN, `U+180E`, `U+034F`, the four
+Hangul fillers, and `U+2028`/`U+2029` in the middle of a name where `strip()` never looks. The
+list had no stated selection rule, so the next one would have been another patch.
+
+The rule is by Unicode general category instead — `Cc`, `Cf`, `Cs`, `Zl`, `Zp` — which covers the
+whole class including characters not yet assigned. The Hangul fillers need an explicit entry
+because they are category `Lo`: they are *letters* that render as nothing, so no category rule
+reaches them.
+
+### The deliberate holes
+
+Five format characters are allowed back in, and saying why is the point:
+
+- **ZWNJ (U+200C) and ZWJ (U+200D)** are the difference between two spellings in Persian, Arabic
+  and several Indic scripts. They are orthography, not decoration.
+- **LRM (U+200E), RLM (U+200F) and ALM (U+061C)** are *marks*: they give a neighbouring character
+  a direction rather than reordering the string, which is what the override set does.
+  Mixed-direction names need them.
+
+Review listed ALM among the characters that should be blocked. It is allowed here, deliberately:
+it is the Arabic counterpart of the two marks already allowed, and blocking it while permitting
+LRM and RLM would be an arbitrary line drawn at the edge of one alphabet.
+
+Each carve-out widens the attack surface slightly. The trade taken is that a name must be
+*representable in the writer's own language*. A deny-list that makes ordinary Persian or Arabic
+names impossible is not a safer system, only a narrower one.
+
+### What is explicitly out of scope
+
+The earlier version of this chapter claimed the deny-list covered "the spoofing that actually
+matters". It did not, and the claim was too broad even for the corrected rule.
+
+**Homoglyphs are not addressed.** `report.txt` with a Greek omicron (U+03BF) or a Cyrillic
+small o (U+043E) renders
+identically to the Latin one and passes every check here. So do visually similar spaces inside a
+name. Catching those needs a confusable-skeleton check against the Unicode security data, which
+is a different piece of work with real false-positive risk for multilingual names.
+
+What *is* covered, stated narrowly: **look-alikes built from characters that render as nothing,
+and names that reorder their own display.**
+
+---
+
+## The ceiling, which is a bound rather than an invariant
+
+`MAX_NODES_PER_USER` stops one account filling the database. It is enforced in `create` rather
+than by a constraint, because a counting constraint would have to serialise every insert for that
+owner.
+
+Two concurrent creates can both pass the check, so the ceiling is soft by the number of requests
+in flight. That is stated rather than hidden: a hard ceiling costs a per-owner counter row that
+every create must lock, which is a bad trade for a limit whose job is to stop scripts rather than
+to bill anyone.
+
+---
+
 ## What is not an invariant
 
 Worth stating, because the absence is deliberate:

@@ -98,7 +98,7 @@ These are not general advice. They are this repository's rules.
 | Lint and format | `make lint` |
 | Type check | `make typecheck` |
 | Regenerate API types | `make openapi` |
-| Guard mutation check | `make verify-guards` |
+| How guards were proven | `make guards` |
 | Everything CI runs | `make ci` |
 
 Tests run against real PostgreSQL. A test that passes on SQLite and fails on PostgreSQL has
@@ -112,8 +112,10 @@ For anything beyond a one-line fix:
 
 1. Write the failing test first. Show it failing.
 2. Implement the smallest change that makes it pass.
-3. Run `make ci` and report the real output.
-4. Re-read the diff for anything unrelated that crept in.
+3. Push and report the real CI output, not a local approximation.
+4. Prove the new test bites: revert the behaviour it covers on a throwaway
+   branch, confirm CI goes red on that test and no other, then delete it.
+5. Re-read the diff for anything unrelated that crept in.
 
 Work happens on branches and merges by pull request — never a push to `main`, and never through
 the GitHub web editor.
@@ -185,8 +187,9 @@ A milestone is not finished while its chapters still describe the previous state
 
 - [ ] The behaviour requested is implemented.
 - [ ] A test covers it, and the test was run and passed.
-- [ ] `make ci` is green locally.
-- [ ] `make verify-guards` still catches all three mutations.
+- [ ] CI is green on the branch.
+- [ ] Every new guard was proven to bite: the behaviour it covers reverted on a
+      throwaway branch, CI confirmed red on exactly that test, branch deleted.
 - [ ] OpenAPI regenerated if any endpoint or schema changed.
 - [ ] No unrelated changes, no placeholders, no secrets in the diff.
 - [ ] The affected book chapters were updated in this pull request.

@@ -277,14 +277,16 @@ jobs:
       - name: Install
         run: pip install -e ".[dev]"
 
-      - name: Invariants
-        run: pytest tests/test_tree_invariants.py -v
+      - name: Invariants and mapping
+        # Selected by marker, not filename, so a new test file is picked up
+        # without anyone remembering to edit this workflow.
+        run: pytest -m "not concurrency" -v
 
       - name: Concurrency
         # Two real connections interleaved. Timeout kept tight: these tests
         # assert that one side BLOCKS, so a hang is a failure, not patience.
         timeout-minutes: 3
-        run: pytest tests/test_concurrency.py -v
+        run: pytest -m concurrency -v
 
       - name: Every test is marked
         run: |

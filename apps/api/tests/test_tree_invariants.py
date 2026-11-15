@@ -389,7 +389,12 @@ def test_path_does_not_cross_owner(
 
 @pytest.mark.invariant
 def test_ancestry_walk_stops_at_the_owner_boundary(
-    svc: TreeService, session: Session, alice: int, bob: int, make_node: Callable[..., int]
+    svc: TreeService,
+    session: Session,
+    alice: int,
+    bob: int,
+    make_node: Callable[..., int],
+    without_owner_fk: None,
 ) -> None:
     """G-05, tested by removing the constraint that makes it unreachable.
 
@@ -398,35 +403,21 @@ def test_ancestry_walk_stops_at_the_owner_boundary(
     to defend against -- and the test above therefore could not fail if that
     predicate were deleted.
 
-    Two independent protections, so each is tested with the other removed. Here
-    the foreign key is dropped, the illegal state is built directly, and the
-    walk is asserted to stop at the boundary anyway.
+    Two independent protections, so each is tested with the other removed. The
+    `without_owner_fk` fixture drops the foreign key and restores it afterwards;
+    the illegal state is built directly and the walk is asserted to stop at the
+    boundary anyway.
 
     Delete `AND n.owner_id = :owner_id` from `_ANCESTRY`'s recursive term and
     this test fails with bob's folder name in alice's breadcrumbs.
     """
     theirs = make_node(bob, "bob-private")
+    smuggled = make_node(alice, "mine", parent_id=theirs)
     session.commit()
 
-    session.execute(text("ALTER TABLE nodes DROP CONSTRAINT fk_nodes_parent_same_owner"))
-    try:
-        smuggled = make_node(alice, "mine", parent_id=theirs)
-        session.commit()
-
-        names = [row["name"] for row in svc.path(alice, smuggled)]
-        assert names == ["mine"], f"the walk crossed an owner boundary: {names}"
-        assert "bob-private" not in names
-    finally:
-        session.execute(text("DELETE FROM nodes WHERE owner_id = :o"), {"o": alice})
-        session.commit()
-        session.execute(
-            text(
-                "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent_same_owner "
-                "FOREIGN KEY (parent_id, owner_id) REFERENCES nodes (id, owner_id) "
-                "ON DELETE CASCADE"
-            )
-        )
-        session.commit()
+    names = [row["name"] for row in svc.path(alice, smuggled)]
+    assert names == ["mine"], f"the walk crossed an owner boundary: {names}"
+    assert "bob-private" not in names
 
 
 # ---------------------------------------------------------------- I7 depth

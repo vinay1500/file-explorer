@@ -53,7 +53,7 @@ def test_opposing_moves_cannot_both_commit_two_cycle(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
-    new_session: Callable[[], Session],
+    new_session: Callable[..., Session],
 ) -> None:
     """Two siblings, each moved into the other.
 
@@ -84,7 +84,7 @@ def test_concurrent_move_four_cycle(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
-    new_session: Callable[[], Session],
+    new_session: Callable[..., Session],
 ) -> None:
     """G-06 and G-07. The test that distinguishes a correct implementation.
 
@@ -193,14 +193,25 @@ def test_move_does_not_block_unrelated_insert(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
-    new_session: Callable[[], Session],
+    new_session: Callable[..., Session],
 ) -> None:
     """G-12. `FOR NO KEY UPDATE`, not `FOR UPDATE`.
 
     `FOR UPDATE` conflicts with `FOR KEY SHARE` — the lock an INSERT takes on
-    its parent row for the foreign key check — so a held ancestry chain would
-    block anyone creating a node underneath it. `FOR NO KEY UPDATE` still
-    excludes other moves, which is all the cycle argument needs.
+    its parent row for the foreign key check — so a held ancestry chain under
+    `FOR UPDATE` would block even a bare INSERT underneath it. `FOR NO KEY
+    UPDATE` does not, and still excludes other moves, which is all the cycle
+    argument needs.
+
+    **This is narrower than it used to claim, and the difference matters.** It
+    says a bare INSERT is not blocked. It does *not* say `TreeService.create`
+    is unaffected: `create` takes `FOR NO KEY UPDATE` on the parent's own
+    ancestry, so it conflicts with a held chain and waits — deliberately, since
+    that lock is what makes its depth measurement mean anything. See
+    `test_create_waits_for_a_move_holding_the_parent_chain`.
+
+    The raw INSERT below is therefore load-bearing rather than a shortcut: it
+    is the only thing that still exercises the FK-check lock in isolation.
     """
     home = make_node(alice, "home")
     sub = make_node(alice, "sub", parent_id=home)

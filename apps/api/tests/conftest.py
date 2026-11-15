@@ -75,7 +75,7 @@ def session(app: Flask) -> Iterator[Session]:
 
 
 @pytest.fixture
-def new_session() -> Iterator[Callable[[], Session]]:
+def new_session() -> Iterator[Callable[..., Session]]:
     """Factory for sessions on their own connections.
 
     Each one is a separate connection to the same database, so two of them can
@@ -85,15 +85,25 @@ def new_session() -> Iterator[Callable[[], Session]]:
     engines = []
     sessions = []
 
-    def make() -> Session:
+    def make(lock_timeout_ms: int = 4000, statement_timeout_ms: int = 8000) -> Session:
+        """A session on its own connection.
+
+        The timeouts are arguments because the retry tests need a lock timeout
+        short enough to fire deliberately — 55P03 is the sqlstate the retry
+        loop exists for, and it is unreachable with a four-second budget.
+        """
         engine = create_engine(
             os.environ["DATABASE_URL"],
             # One connection each, and no pooling surprises between tests.
             pool_size=1,
             max_overflow=0,
-            # A test that waits on a lock for more than a few seconds has
+            # A test that waits on a lock for longer than it meant to has
             # already failed; fail loudly instead of hanging the suite.
-            connect_args={"options": "-c lock_timeout=4000 -c statement_timeout=8000"},
+            connect_args={
+                "options": (
+                    f"-c lock_timeout={lock_timeout_ms} -c statement_timeout={statement_timeout_ms}"
+                )
+            },
         )
         s = sessionmaker(bind=engine)()
         engines.append(engine)
@@ -138,6 +148,46 @@ def make_node(session: Session) -> Callable[..., int]:
         )
 
     return _make
+
+
+@pytest.fixture
+def without_owner_fk(session: Session) -> Iterator[None]:
+    """Drop the composite owner key for one test, then put it back.
+
+    Some guards defend against states the composite key makes unreachable, so
+    with the key in place those guards cannot fail and the tests that cover
+    them would pass with the guard deleted. The honest way to test them is to
+    remove the other protection and build the illegal state directly.
+
+    The definition lives here rather than in each test: two copies of this DDL
+    is how one of them quietly re-creates a *different* constraint and the
+    suite keeps passing against a schema nobody meant.
+
+    Teardown deletes every node first -- `ADD CONSTRAINT` validates existing
+    rows, so the illegal state has to go before the key comes back, and it has
+    to happen even when the test fails.
+    """
+    session.execute(text("ALTER TABLE nodes DROP CONSTRAINT fk_nodes_parent_same_owner"))
+    # Committed immediately. Teardown has to roll back first -- a test that
+    # failed mid-transaction leaves the session unusable otherwise -- and an
+    # uncommitted DROP would be undone by that rollback, so the ADD below would
+    # then fail with "constraint already exists" and take out every later test
+    # with it. The visible failure would be somewhere else entirely.
+    session.commit()
+    try:
+        yield
+    finally:
+        session.rollback()
+        session.execute(text("DELETE FROM nodes"))
+        session.commit()
+        session.execute(
+            text(
+                "ALTER TABLE nodes ADD CONSTRAINT fk_nodes_parent_same_owner "
+                "FOREIGN KEY (parent_id, owner_id) REFERENCES nodes (id, owner_id) "
+                "ON DELETE CASCADE"
+            )
+        )
+        session.commit()
 
 
 @pytest.fixture

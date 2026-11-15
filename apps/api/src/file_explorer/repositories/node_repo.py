@@ -15,12 +15,17 @@ All parameters are bound. Nothing here is composed with an f-string.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+
+from file_explorer.errors import TreeTooDeep
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -71,9 +76,17 @@ _SUBTREE_HEIGHT = text("""
 # Locks the node being moved together with the destination's ancestry chain.
 #
 # FOR NO KEY UPDATE, not FOR UPDATE: FOR UPDATE conflicts with FOR KEY SHARE,
-# the lock an INSERT takes on its parent for the foreign-key check, so holding a
-# chain under FOR UPDATE would block unrelated creates underneath it. NO KEY
+# the lock an INSERT takes on its parent for the foreign-key check. NO KEY
 # UPDATE still excludes other moves, which is all the cycle argument needs.
+#
+# What that buys, stated precisely, because the obvious reading is now wrong:
+# a held chain does not block a bare INSERT underneath it. It DOES block
+# `TreeService.create`, which takes FOR NO KEY UPDATE on the parent's own
+# ancestry (see `_LOCK_ANCESTRY`) and therefore conflicts here deliberately.
+# That serialisation is the point -- it is what keeps create's depth
+# measurement meaningful -- and it is a cost, not a free win. Chains that do
+# not overlap still do not wait on each other, which is the property that
+# actually matters at any scale.
 #
 # ORDER BY id so every transaction takes the same lock order. That is a
 # convention, not a guarantee -- a concurrent cascading delete locks in scan
@@ -100,6 +113,106 @@ _LOCK_CHAIN = text("""
 """)
 
 
+# Locks a node together with everything above it. `create` holds this over its
+# depth measurement: without it a concurrent move can re-parent the chain deeper
+# between the measurement and the insert, and the new node lands past the cap.
+#
+# Same FOR NO KEY UPDATE reasoning as _LOCK_CHAIN -- and the same ORDER BY id,
+# so a create and a move contending for one chain agree on lock order.
+_LOCK_ANCESTRY = text("""
+    WITH RECURSIVE ancestry AS (
+        SELECT id, parent_id, 0 AS depth
+          FROM nodes
+         WHERE id = :node_id
+           AND owner_id = :owner_id
+        UNION ALL
+        SELECT n.id, n.parent_id, a.depth + 1
+          FROM nodes n
+          JOIN ancestry a ON n.id = a.parent_id
+         WHERE n.owner_id = :owner_id
+           AND a.depth < :max_depth
+    )
+    SELECT id
+      FROM nodes
+     WHERE owner_id = :owner_id
+       AND id IN (SELECT id FROM ancestry)
+     ORDER BY id
+       FOR NO KEY UPDATE
+""")
+
+
+# Counts a subtree, and reports how deep it had to go to do it. The depth comes
+# back so the caller can tell a complete count from a truncated one -- the same
+# argument as `ancestry`: a bounded walk that returns a short answer silently is
+# worse than one that fails.
+_SUBTREE_SIZE = text("""
+    WITH RECURSIVE descendants AS (
+        SELECT id, 0 AS depth
+          FROM nodes
+         WHERE id = :node_id
+           AND owner_id = :owner_id
+        UNION ALL
+        SELECT n.id, d.depth + 1
+          FROM nodes n
+          JOIN descendants d ON n.parent_id = d.id
+         WHERE n.owner_id = :owner_id
+           AND d.depth < :max_depth
+    )
+    SELECT count(*), COALESCE(MAX(depth), 0) FROM descendants
+""")
+
+# One row, locked. `delete` holds this over its count.
+#
+# It is a single row rather than a chain, and that is enough because `create`
+# locks its parent's ENTIRE ancestry -- so a create anywhere beneath this node
+# already conflicts here, and the count cannot grow underneath the delete.
+_LOCK_ONE = text("""
+    SELECT id
+      FROM nodes
+     WHERE id = :node_id
+       AND owner_id = :owner_id
+       FOR NO KEY UPDATE
+""")
+
+
+# Listing, by keyset rather than OFFSET.
+#
+# OFFSET re-walks and discards every row it skips, so page 500 costs 500 pages
+# of work -- and if a row is inserted or deleted while someone pages through,
+# the window shifts underneath them and rows are silently skipped or repeated.
+# Keyset asks for "the rows after this one" in sort order, which is one index
+# seek whatever the page number, and is stable under concurrent writes.
+#
+# COLLATE "C" in BOTH the comparison and the ORDER BY, matching the collation
+# pinned on the indexes in migration 0002. If the comparison and the stored
+# order disagree, keyset skips rows -- and every individual page still looks
+# plausible, which is what makes it so hard to notice.
+#
+# ('', 0) is the first-page sentinel, and it is sound rather than lucky:
+# `ck_nodes_name_not_blank` means no stored name can be empty, so ('', 0) is
+# strictly below every real (name, id). That lets one statement serve the first
+# page and every page after it, instead of two plans that can drift apart.
+_LIST_CHILDREN = text("""
+    SELECT id, parent_id, name, type
+      FROM nodes
+     WHERE owner_id = :owner_id
+       AND parent_id = :parent_id
+       AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+     ORDER BY name COLLATE "C", id
+     LIMIT :limit
+""")
+
+_LIST_ROOTS = text("""
+    SELECT id, parent_id, name, type
+      FROM nodes
+     WHERE owner_id = :owner_id
+       AND parent_id IS NULL
+       AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+     ORDER BY name COLLATE "C", id
+     LIMIT :limit
+""")
+
+
 class NodeRepository:
     def __init__(self, session: Session, max_depth: int) -> None:
         self._s = session
@@ -123,23 +236,57 @@ class NodeRepository:
         return None if row is None else NodeRow(row[0], row[1], row[2], str(row[3]))
 
     def ancestry(self, owner_id: int, node_id: int) -> list[tuple[int, int | None, str, str, int]]:
-        """`node_id` and its ancestors, nearest first. Breadcrumbs read this."""
-        return [
+        """`node_id` and its ancestors, nearest first. Breadcrumbs read this.
+
+        Raises `TreeTooDeep` if the walk hit its bound. The CTE stops at
+        `max_depth`, so on an over-deep chain it returns a **partial** answer
+        with no error -- and a partial ancestry is worse than no ancestry,
+        because `is_ancestor_of` would then miss a genuine ancestor and the
+        cycle check would fail open. Detecting the truncation turns a silent
+        wrong answer into a loud one.
+
+        A legal node sits at level `max_depth` or less, so its ancestry is at
+        most `max_depth` rows. The recursive term runs while `depth <
+        max_depth`, so it can emit one row beyond that -- which means more than
+        `max_depth` rows can only come from data that already breaks I7.
+        """
+        rows = [
             (r[0], r[1], r[2], str(r[3]), r[4])
             for r in self._s.execute(
                 _ANCESTRY,
                 {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
             ).all()
         ]
+        if len(rows) > self._max_depth:
+            log.error(
+                "ancestry walk hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return rows
 
     def subtree_height(self, owner_id: int, node_id: int) -> int:
-        """Levels below `node_id`; 0 for a leaf."""
-        return int(
+        """Levels below `node_id`; 0 for a leaf.
+
+        Same truncation argument as `ancestry`. A root can legally carry a
+        height of `max_depth - 1`; reaching `max_depth` means the descending
+        walk was cut short and the number returned is a floor, not a height.
+        Using a floor in the move bound would let an over-deep subtree move
+        anywhere.
+        """
+        height = int(
             self._s.execute(
                 _SUBTREE_HEIGHT,
                 {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
             ).scalar_one()
         )
+        if height >= self._max_depth:
+            log.error(
+                "subtree walk hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return height
 
     def lock_move_participants(
         self, owner_id: int, node_id: int, new_parent_id: int | None
@@ -174,29 +321,191 @@ class NodeRepository:
         the rows the lock query returned -- the obvious optimisation -- lets two
         moves across separate trees commit a 4-cycle.
         """
-        return bool(
+        found, deepest = self._s.execute(
+            text("""
+            WITH RECURSIVE ancestry AS (
+                SELECT id, parent_id, 0 AS depth
+                  FROM nodes
+                 WHERE id = :node_id
+                   AND owner_id = :owner_id
+                UNION ALL
+                SELECT n.id, n.parent_id, a.depth + 1
+                  FROM nodes n
+                  JOIN ancestry a ON n.id = a.parent_id
+                 WHERE n.owner_id = :owner_id
+                   AND a.depth < :max_depth
+            )
+            SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id) AS found,
+                   COALESCE((SELECT max(depth) FROM ancestry), 0) AS deepest
+            """),
+            {
+                "node_id": node_id,
+                "candidate_id": candidate_id,
+                "owner_id": owner_id,
+                "max_depth": self._max_depth,
+            },
+        ).one()
+        # The one bounded walk that used to have no truncation check. A
+        # truncated ancestry here answers "no, not an ancestor" for a node that
+        # is one -- which is the cycle check failing open, the exact failure the
+        # depth bound exists to prevent. Statement ordering in `_move_once`
+        # happened to catch it first; that is luck, not a guard.
+        if int(deepest) >= self._max_depth:
+            log.error(
+                "ancestor walk hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return bool(found)
+
+    def lock_ancestry(self, owner_id: int, node_id: int) -> list[int]:
+        """Lock `node_id` and every node above it. Returns the locked ids.
+
+        `create` calls this before measuring depth. An empty list means the
+        node is gone or was never the caller's.
+        """
+        return [
+            r[0]
+            for r in self._s.execute(
+                _LOCK_ANCESTRY,
+                {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
+            ).all()
+        ]
+
+    def insert_node(self, owner_id: int, parent_id: int | None, name: str, node_type: str) -> int:
+        """Insert one node, returning its id.
+
+        `owner_id` is written from the actor, never taken from the request, so
+        a node cannot be created into someone else's tree even if every check
+        above were removed -- and the composite foreign key then refuses a
+        parent belonging to anyone else.
+
+        The cast is explicit because `type` is an enum: a bound parameter
+        arrives as text and PostgreSQL will not coerce it in an INSERT without
+        being told to.
+        """
+        return int(
             self._s.execute(
                 text("""
-                WITH RECURSIVE ancestry AS (
-                    SELECT id, parent_id, 0 AS depth
-                      FROM nodes
-                     WHERE id = :node_id
-                       AND owner_id = :owner_id
-                    UNION ALL
-                    SELECT n.id, n.parent_id, a.depth + 1
-                      FROM nodes n
-                      JOIN ancestry a ON n.id = a.parent_id
-                     WHERE n.owner_id = :owner_id
-                       AND a.depth < :max_depth
-                )
-                SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id)
+                INSERT INTO nodes (owner_id, parent_id, name, type)
+                VALUES (:owner_id, :parent_id, :name, CAST(:type AS node_type))
+                RETURNING id
                 """),
                 {
-                    "node_id": node_id,
-                    "candidate_id": candidate_id,
                     "owner_id": owner_id,
-                    "max_depth": self._max_depth,
+                    "parent_id": parent_id,
+                    "name": name,
+                    "type": node_type,
                 },
+            ).scalar_one()
+        )
+
+    def set_name(self, owner_id: int, node_id: int, name: str) -> int:
+        """Rename one node. Returns rows affected.
+
+        Scoped by `owner_id` in the WHERE clause for the same reason
+        `set_parent` is: the guard has to survive the checks above being
+        deleted. 0 rows is a 404, not a success.
+        """
+        result = self._s.execute(
+            text(
+                "UPDATE nodes SET name = :name, updated_at = now() "
+                "WHERE id = :node_id AND owner_id = :owner_id"
+            ),
+            {"node_id": node_id, "name": name, "owner_id": owner_id},
+        )
+        return cast("CursorResult[Any]", result).rowcount
+
+    def lock_one(self, owner_id: int, node_id: int) -> bool:
+        """Lock a single node. False if it is gone or was never the caller's."""
+        return (
+            self._s.execute(_LOCK_ONE, {"node_id": node_id, "owner_id": owner_id}).one_or_none()
+            is not None
+        )
+
+    def subtree_size(self, owner_id: int, node_id: int) -> int:
+        """How many nodes `node_id` carries, counting itself. 0 if it is not there.
+
+        Raises `TreeTooDeep` on a truncated walk, for the same reason
+        `subtree_height` does: an undercount here would be reported to the
+        caller as the number of things deleted, which is a lie about data that
+        is already gone.
+        """
+        count, deepest = self._s.execute(
+            _SUBTREE_SIZE,
+            {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
+        ).one()
+        if int(deepest) >= self._max_depth:
+            log.error(
+                "subtree count hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return int(count)
+
+    def delete_node(self, owner_id: int, node_id: int) -> int:
+        """Delete one node. Returns rows directly affected -- 1 or 0.
+
+        The subtree goes with it through `ON DELETE CASCADE`, which is I3 and
+        is the database's job, not this method's. The original schema had no
+        cascade, so SQLAlchemy nulled each child's `parent_id` instead -- and
+        NULL means root, so deleting a folder emptied it onto the top level.
+
+        The rowcount counts only this row; the cascade is invisible to it.
+        That is why the caller counts the subtree beforehand rather than
+        reading a number back from here.
+        """
+        result = self._s.execute(
+            text("DELETE FROM nodes WHERE id = :node_id AND owner_id = :owner_id"),
+            {"node_id": node_id, "owner_id": owner_id},
+        )
+        return cast("CursorResult[Any]", result).rowcount
+
+    def list_children(
+        self, owner_id: int, parent_id: int, limit: int, after: tuple[str, int]
+    ) -> list[NodeRow]:
+        """One page of a folder's children, ordered by `(name, id)` under C."""
+        return [
+            NodeRow(r[0], r[1], r[2], str(r[3]))
+            for r in self._s.execute(
+                _LIST_CHILDREN,
+                {
+                    "owner_id": owner_id,
+                    "parent_id": parent_id,
+                    "after_name": after[0],
+                    "after_id": after[1],
+                    "limit": limit,
+                },
+            ).all()
+        ]
+
+    def list_roots(self, owner_id: int, limit: int, after: tuple[str, int]) -> list[NodeRow]:
+        """One page of an owner's roots, ordered the same way."""
+        return [
+            NodeRow(r[0], r[1], r[2], str(r[3]))
+            for r in self._s.execute(
+                _LIST_ROOTS,
+                {
+                    "owner_id": owner_id,
+                    "after_name": after[0],
+                    "after_id": after[1],
+                    "limit": limit,
+                },
+            ).all()
+        ]
+
+    def count_for_owner(self, owner_id: int) -> int:
+        """How many nodes this owner holds.
+
+        A plain count, which is honest about its cost: it scans the owner's
+        slice of `ix_nodes_owner_parent`. At the 50,000 ceiling that is cheap;
+        it would not be at ten million, and the answer then is a counter row
+        rather than a faster count.
+        """
+        return int(
+            self._s.execute(
+                text("SELECT count(*) FROM nodes WHERE owner_id = :owner_id"),
+                {"owner_id": owner_id},
             ).scalar_one()
         )
 

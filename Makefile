@@ -9,7 +9,7 @@ WEB := $(COMPOSE) exec -T web
 .DEFAULT_GOAL := help
 .PHONY: help db up down restart logs ps shell-api shell-db \
         migrate revision test-api test-web test-e2e test \
-        lint format typecheck openapi verify-guards a11y ci clean
+        lint format typecheck openapi guards a11y ci clean
 
 # apps/ arrives with the subtree graft. Until then, fail with a useful message
 # instead of a confusing build error.
@@ -17,7 +17,7 @@ define need-apps
 	@test -d apps/api || { \
 		echo ""; \
 		echo "  apps/api is not here yet."; \
-		echo "  It arrives with the subtree graft — see .state/RESUME.md, task M1.3."; \
+		echo "  It arrives with the subtree graft — see CONTRIBUTING.md."; \
 		echo "  Until then: make db  (postgres runs on its own)"; \
 		echo ""; \
 		exit 1; }
@@ -112,11 +112,19 @@ a11y: ## axe-core against the running web app
 	$(need-apps)
 	$(WEB) npx playwright test --grep @a11y
 
-verify-guards: ## Revert each guard and prove the suite catches it
-	$(need-apps)
-	./scripts/verify-guards.sh
+guards: ## How each guard was proven to bite, and where
+	@echo ""
+	@echo "  Guard verification does not run here."
+	@echo ""
+	@echo "  A guard is proven by reverting the behaviour it covers on a throwaway"
+	@echo "  branch, pushing it, and confirming CI goes red on exactly that test."
+	@echo "  It needs CI, not a local runtime, so there is no local target for it."
+	@echo ""
+	@echo "  The record lives in the pull request that introduced each guard:"
+	@echo "    https://github.com/vinay1500/file-explorer/pulls?q=is%3Apr+is%3Aclosed"
+	@echo ""
 
-ci: lint typecheck test verify-guards ## Everything CI runs
+ci: lint typecheck test ## Everything CI runs
 
 clean: ## Remove containers and the database volume — destroys local data
 	$(COMPOSE) down -v
