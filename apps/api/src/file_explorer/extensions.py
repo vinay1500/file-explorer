@@ -34,4 +34,14 @@ migrate = Migrate()
 # Keyed on the remote address today. At M5 this becomes the authenticated
 # actor, because an address is shared by everyone behind one NAT and is
 # trivially changed by anyone who cares.
+#
+# **This is a singleton, and its limits come from whichever application calls
+# `init_app` first.** A second `create_app` with different `RATELIMIT_*`
+# settings gets the first one's limits, silently -- found when a test
+# configured "2 per minute" and the response said `X-RateLimit-Limit: 120`.
+#
+# Harmless in production, where there is one application. It matters for tests:
+# drive the configured limit rather than trying to lower it, and call
+# `limiter.reset()` on both sides, because the in-memory bucket is shared by
+# everything else running in the same minute.
 limiter = Limiter(key_func=get_remote_address)

@@ -21,7 +21,7 @@ from sqlalchemy.exc import OperationalError
 
 from file_explorer.app import create_app
 from file_explorer.config import Config
-from file_explorer.extensions import db
+from file_explorer.extensions import db, limiter
 
 
 @pytest.fixture
@@ -242,43 +242,48 @@ def test_a_repr_does_not_carry_user_content(session: object, alice: int) -> None
 
 
 @pytest.mark.invariant
-def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not() -> None:
-    """Both arms of the header strip, and the only test that drives a real 429.
+def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not(wired: Flask) -> None:
+    """Both arms of the header strip, driven against the real configured limit.
 
-    The first version sent twelve requests against a limit of a hundred and
-    twenty, so deleting the exemption it was testing survived it. This sets the
-    limit to something a test can exceed.
+    Two earlier attempts at this were wrong in instructive ways.
 
-    It asserts both arms, because only one of them is obvious: a 429 must keep
-    `Retry-After`, and a successful response must not, where it means nothing
-    and a cautious client may honour it anyway.
+    The first sent twelve requests against a limit of a hundred and twenty, so
+    deleting the exemption it was testing survived it.
+
+    The second built an app with `RATELIMIT_DEFAULT = "2 per minute"` and got
+    `X-RateLimit-Limit: 120` back. **`Limiter` is a module-level singleton and
+    takes its limits from whichever app initialises it first.** With one
+    application that is invisible; here it meant the configuration under test
+    was never in force. The diagnostic that found it is worth more than the
+    test: `enabled=True default='2 per minute' … headers={'X-RateLimit-Limit':
+    '120'}`.
+
+    So this drives the limit the application actually has, and resets the
+    shared bucket on both sides — otherwise it spends the budget every later
+    test in the same minute is sharing.
     """
+    limit = int(wired.config["RATELIMIT_DEFAULT"].split()[0])
+    client = wired.test_client()
 
-    class Tight(Config):
-        RATELIMIT_DEFAULT = "2 per minute"
+    limiter.reset()
+    try:
+        responses = [client.get("/api/v1/roots") for _ in range(limit + 5)]
+    finally:
+        limiter.reset()
 
-    built = create_app(Tight)
-    built.config["DEV_ACTOR_ID"] = 1
-    client = built.test_client()
-
-    responses = [client.get("/api/v1/roots") for _ in range(8)]
     limited = [r for r in responses if r.status_code == 429]
     allowed = [r for r in responses if r.status_code != 429]
 
-    first = responses[0]
     assert limited, (
-        "the limiter never fired after eight requests against a limit of two. "
-        f"enabled={built.config.get('RATELIMIT_ENABLED')} "
-        f"default={built.config.get('RATELIMIT_DEFAULT')!r} "
-        f"storage={built.config.get('RATELIMIT_STORAGE_URI')!r} "
-        f"headers={ {k: v for k, v in first.headers if k.lower().startswith('x-ratelimit')} } "
-        f"statuses={[r.status_code for r in responses]}"
+        f"the limiter never fired in {limit + 5} requests against a limit of "
+        f"{limit}; X-RateLimit-Limit was "
+        f"{responses[0].headers.get('X-RateLimit-Limit')}"
     )
     assert limited[0].content_type.startswith("application/problem+json")
     assert limited[0].get_json()["code"] == "RATE_LIMITED"
     assert limited[0].headers.get("Retry-After"), "a 429 with no Retry-After says nothing"
     # The same `after_request` sets these, so their absence would mean a 429
-    # bypasses it entirely and carries neither `no-store` nor `nosniff`.
+    # bypasses it and carries neither `no-store` nor `nosniff`.
     assert limited[0].headers.get("Cache-Control") == "no-store"
     assert limited[0].headers.get("X-Content-Type-Options") == "nosniff"
 
@@ -289,27 +294,26 @@ def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not() -> None
 
 
 @pytest.mark.invariant
-def test_health_stays_available_while_everything_else_is_limited() -> None:
-    """The exemption, against a limit low enough to prove it exists.
+def test_health_stays_available_while_everything_else_is_limited(wired: Flask) -> None:
+    """The exemption, against the limit the application actually has.
 
     A limiter that can silence the health check turns a busy minute into an
-    outage: the thing that reports whether the service is alive stops
-    answering precisely when someone is asking.
+    outage: the one endpoint that reports whether the service is alive stops
+    answering precisely when somebody is asking.
     """
+    limit = int(wired.config["RATELIMIT_DEFAULT"].split()[0])
+    client = wired.test_client()
 
-    class Tight(Config):
-        RATELIMIT_DEFAULT = "2 per minute"
+    limiter.reset()
+    try:
+        for _ in range(limit + 5):
+            client.get("/api/v1/roots")
+        assert client.get("/api/v1/roots").status_code == 429, "the limiter is not on"
 
-    built = create_app(Tight)
-    built.config["DEV_ACTOR_ID"] = 1
-    client = built.test_client()
-
-    for _ in range(8):
-        client.get("/api/v1/roots")
-    assert client.get("/api/v1/roots").status_code == 429, "the limiter is not actually on"
-
-    for _ in range(8):
-        assert client.get("/api/v1/health").status_code in {200, 503}, (
-            "health was rate limited, so a busy minute silences the one endpoint "
-            "that reports whether the service is alive"
-        )
+        for _ in range(10):
+            assert client.get("/api/v1/health").status_code in {200, 503}, (
+                "health was rate limited, so a busy minute silences the one "
+                "endpoint that reports whether the service is alive"
+            )
+    finally:
+        limiter.reset()
