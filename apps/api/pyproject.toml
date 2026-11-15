@@ -48,6 +48,14 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# RUF001 flags characters confusable with ASCII -- Arabic alef for "l", heh for
+# "o" and so on. That is a good rule for ordinary code and a guaranteed false
+# positive in the one file whose subject is non-ASCII names: its test data is
+# Persian, Devanagari, Hebrew and CJK on purpose. Scoped to this file rather
+# than allow-listed globally, so the rule keeps working everywhere else.
+"tests/test_names_and_limits.py" = ["RUF001"]
+
 [tool.mypy]
 python_version = "3.11"
 packages = ["file_explorer"]
