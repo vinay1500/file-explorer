@@ -349,8 +349,6 @@ class TreeService:
         #    the delete, the escaped subtree survives -- correctly -- and the
         #    count is high by its size. The alternative is locking every row in
         #    the subtree, which is the cost this design exists to avoid.
-        if not self._repo.lock_one(actor_id, node_id):
-            raise NodeNotFound  # deleted between the read and the lock
 
         # 3. Count while holding the lock.
         removed = self._repo.subtree_size(actor_id, node_id)
