@@ -1,7 +1,8 @@
 """Failing tests for the five faults review found in already-shipped code.
 
-Written before the fixes, so CI records them red. Each names the register id
-from `.state/agents/M3-GATE1-REGISTER.md`.
+Written before the fixes, so CI records them red. The A-n ids are the review
+findings they close, and each test says in its own docstring what the fault was
+-- so this file stands on its own rather than pointing at notes you do not have.
 
 These exercise `TreeService._translate` and the schema directly rather than
 through an endpoint, because there is no HTTP layer yet — and because the leak
