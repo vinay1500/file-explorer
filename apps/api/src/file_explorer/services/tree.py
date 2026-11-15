@@ -250,9 +250,6 @@ class TreeService:
             #    recursive walks are bounded at `max_depth` and an over-deep
             #    chain truncates them. A truncated ancestry makes the cycle
             #    check fail open, so the depth cap is load-bearing for I1.
-            locked = self._repo.lock_ancestry(actor_id, parent_id)
-            if parent_id not in locked:
-                raise NodeNotFound  # deleted between the read and the lock
 
             # 3. Measure as a FRESH statement, after the locks are held.
             #    `FOR NO KEY UPDATE` does not refresh a recursive CTE, so the
