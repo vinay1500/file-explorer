@@ -29,8 +29,8 @@ from file_explorer.errors import (
     NodeNotFound,
     OperationTimedOut,
     QuotaExceeded,
-    TreeBusy,
     StorageError,
+    TreeBusy,
 )
 from file_explorer.limits import DEFAULT_PAGE, MAX_NODES_PER_USER, MAX_PAGE
 from file_explorer.names import clean
