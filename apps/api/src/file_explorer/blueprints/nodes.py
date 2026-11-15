@@ -21,10 +21,10 @@ from flask.views import MethodView
 from flask_smorest import Blueprint
 
 from file_explorer import cursors
-from file_explorer.problems import PROBLEM_CONTENT_TYPE
 from file_explorer.app import tree_service
 from file_explorer.auth import require_actor
 from file_explorer.extensions import db
+from file_explorer.problems import PROBLEM_CONTENT_TYPE
 from file_explorer.schemas.node import (
     DeletedSchema,
     NodeCreateSchema,

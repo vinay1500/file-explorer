@@ -16,9 +16,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from file_explorer import problems
-from file_explorer.problems import PROBLEM_CONTENT_TYPE
 from file_explorer.config import Config, engine_options
 from file_explorer.extensions import db, limiter, migrate
+from file_explorer.problems import PROBLEM_CONTENT_TYPE
 from file_explorer.schemas.node import ProblemSchema
 from file_explorer.services.tree import TreeService
 
