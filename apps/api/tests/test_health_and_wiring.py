@@ -57,7 +57,7 @@ def test_health_executes_a_query_rather_than_returning_a_constant(wired: Flask) 
 
 @pytest.mark.invariant
 def test_health_reports_degraded_when_the_database_is_unreachable(
-    wired: Flask, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    wired: Flask, caplog: pytest.LogCaptureFixture
 ) -> None:
     """The half that proves the other half means something.
 
@@ -68,11 +68,19 @@ def test_health_reports_degraded_when_the_database_is_unreachable(
     def unreachable(*_: object, **__: object) -> None:
         raise OperationalError("SELECT 1", {}, Exception("could not translate host name"))
 
-    monkeypatch.setattr(db.session, "execute", unreachable)
+    # Not `monkeypatch.setattr`. `db.session` is a scoped_session *proxy*, and
+    # `execute` reaches the real Session through `__getattr__` rather than
+    # living on the proxy. monkeypatch records the proxied value and restores
+    # it by assignment, which leaves a permanent instance attribute shadowing
+    # the proxy for every later test in the session.
+    db.session.execute = unreachable  # type: ignore[method-assign]
+    try:
+        with caplog.at_level(logging.ERROR):
+            response = wired.test_client().get("/api/v1/health")
+    finally:
+        del db.session.execute  # type: ignore[attr-defined]
 
-    with caplog.at_level(logging.ERROR):
-        response = wired.test_client().get("/api/v1/health")
-
+    assert "execute" not in vars(db.session), "the patched method outlived the test"
     assert response.status_code == 503
     assert response.get_json() == {"status": "degraded", "db": "unreachable"}
 

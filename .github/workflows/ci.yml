@@ -319,8 +319,6 @@ jobs:
 
       - name: Coverage
         working-directory: apps/api
-        env:
-          DATABASE_URL: postgresql://fileexplorer:localdev@localhost:5432/file_explorer_test
         run: |
           # --precision=2, because `--fail-under` compares the *rounded* total
           # and the default precision is 0. At 98 that made the real floor
