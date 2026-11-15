@@ -39,9 +39,22 @@ def test_none_passes_through_as_the_first_page() -> None:
 
 @pytest.mark.invariant
 def test_an_encoded_cursor_is_url_safe() -> None:
-    """It travels in a query string, so `+`, `/` and `=` would all need escaping."""
-    token = cursors.encode(("éèê" * 40, 123))
+    """It travels in a query string, so `+`, `/` and `=` would all need escaping.
+
+    The input is chosen so standard base64 *would* produce both `+` and `/`.
+    The first version used a different string and happened to encode to neither,
+    so swapping `urlsafe_b64encode` for `b64encode` survived it — a test that
+    could not tell the two apart while being named for the difference.
+    """
+    name = "".join(chr(c) for c in (0x3EB, 0x3FF, 0x7F8, 0x7FE)) * 8
+    standard = base64.b64encode(f"{name}\x1f9".encode()).decode()
+    assert "+" in standard and "/" in standard, (
+        "the input no longer distinguishes the two alphabets, so this test is blind"
+    )
+
+    token = cursors.encode((name, 9))
     assert not set(token) & set("+/="), f"not URL-safe: {token}"
+    assert cursors.decode(token) == (name, 9)
 
 
 @pytest.mark.invariant
@@ -67,15 +80,27 @@ def test_a_malformed_cursor_is_rejected(label: str, token: str) -> None:
 
 
 @pytest.mark.invariant
-def test_a_forged_cursor_cannot_reach_another_owner(alice: int, bob: int) -> None:
-    """Why the cursor is unsigned, stated as a test rather than a comment.
+def test_a_cursor_carries_no_identity() -> None:
+    """Why the cursor is unsigned, stated as something that can be wrong.
 
-    Signing it would add a key to manage. It is unnecessary because the cursor
-    is only ever a position in an already owner-scoped query: forging one skips
-    part of the forger's own listing and reaches nothing else. This asserts the
-    thing that argument depends on — a cursor carries no owner at all.
+    The argument is that signing buys nothing because a cursor is only ever a
+    position inside an already owner-scoped query. That argument depends on one
+    checkable fact: the cursor carries no owner.
+
+    The first version of this asserted `str(bob) not in encode(...)` and ended
+    with `or alice == 1`, which is true whenever alice is id 1 — always, under
+    `RESTART IDENTITY`. It was a tautology wrapped around an assertion that
+    depended on an id not colliding by chance.
     """
-    name, node_id = cursors.decode(cursors.encode(("anything", 1)))  # type: ignore[misc]
-    assert (name, node_id) == ("anything", 1)
-    assert str(bob) not in cursors.encode(("anything", 1))
-    assert str(alice) not in cursors.encode(("anything", 1)) or alice == 1
+    import inspect
+
+    source = inspect.getsource(cursors.encode)
+    assert "owner" not in source, (
+        "encode() mentions an owner, so a cursor may carry identity and the "
+        "unsigned argument no longer holds"
+    )
+
+    # And the round trip preserves exactly two fields, neither of them an owner.
+    decoded = cursors.decode(cursors.encode(("name", 7)))
+    assert decoded == ("name", 7)
+    assert len(decoded) == 2  # type: ignore[arg-type]

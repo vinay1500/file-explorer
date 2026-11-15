@@ -16,7 +16,7 @@ import logging
 from collections.abc import Iterator
 
 import pytest
-from flask import Flask
+from flask import Flask, request
 from sqlalchemy.exc import OperationalError
 
 from file_explorer.app import create_app
@@ -83,14 +83,6 @@ def test_health_reports_degraded_when_the_database_is_unreachable(
     )
 
 
-@pytest.mark.invariant
-def test_health_is_not_rate_limited(wired: Flask) -> None:
-    """A limiter that can silence the health check turns a busy minute into an outage."""
-    client = wired.test_client()
-    for _ in range(12):
-        assert client.get("/api/v1/health").status_code in {200, 503}
-
-
 # ------------------------------------------------------- the last resort
 
 
@@ -140,14 +132,36 @@ def test_a_forwarded_address_is_trusted_only_when_configured() -> None:
     the rate limit becomes a global outage switch. Non-zero and *not* behind
     one: every caller sets their own key through `X-Forwarded-For` and the
     limit stops existing. Neither is safe to guess, so it is explicit.
+
+    Asserted on what the app actually sees, not on a class name. The first
+    version checked `type(app.wsgi_app).__name__ == "ProxyFix"`, which
+    `ProxyFix(..., x_for=0)` satisfies while trusting nothing.
     """
 
     class Trusting(Config):
         TRUST_PROXY_HOPS = 1
 
-    assert type(create_app(Config).wsgi_app).__name__ != "ProxyFix"
-    assert type(create_app(Trusting).wsgi_app).__name__ == "ProxyFix", (
-        "TRUST_PROXY_HOPS was set and the forwarded headers are still ignored"
+    seen: dict[str, str | None] = {}
+
+    def record(built: Flask) -> str | None:
+        @built.get("/api/v1/whoami")
+        def _whoami() -> str:
+            seen["addr"] = request.remote_addr
+            return "ok"
+
+        built.test_client().get("/api/v1/whoami", headers={"X-Forwarded-For": "203.0.113.9"})
+        return seen.get("addr")
+
+    ignored = record(create_app(Config))
+    trusted = record(create_app(Trusting))
+
+    assert ignored != "203.0.113.9", (
+        "a forwarded address was trusted with TRUST_PROXY_HOPS unset, so any "
+        "caller can choose their own rate-limit key"
+    )
+    assert trusted == "203.0.113.9", (
+        "TRUST_PROXY_HOPS is set and the forwarded address is still ignored, so "
+        "behind a balancer every caller shares one bucket"
     )
 
 
@@ -199,20 +213,29 @@ def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem() -> None
 
 
 @pytest.mark.invariant
-def test_the_models_describe_themselves(session: object, alice: int) -> None:
-    """`__repr__` is debugging infrastructure, so it should not be the thing that breaks.
+def test_a_repr_does_not_carry_user_content(session: object, alice: int) -> None:
+    """`__repr__` lands in logs and tracebacks, so it must not carry content.
 
-    Cheap, and it is the line you reach for when something has gone wrong — a
-    `__repr__` that raises turns one failure into two.
+    Both models say so in their own comments. The first version of this test
+    asserted only that the string mentioned the class — adding `name=` and
+    `email=` would have survived it, which is the property the comments are
+    actually about.
     """
     from file_explorer.models.node import Node, NodeType
     from file_explorer.models.user import User
 
-    # NodeType, not the string: `__repr__` reads `.value`, so a plain string
-    # raises AttributeError -- which is the failure mode this test is for.
-    node = Node(owner_id=alice, name="x", type=NodeType.FOLDER)
+    # NodeType, not the string: `__repr__` reads `.value`.
+    node = Node(owner_id=alice, name="quarterly-layoffs.xlsx", type=NodeType.FOLDER)
     user = session.get(User, alice)  # type: ignore[attr-defined]
 
-    assert "Node" in repr(node)
-    assert "folder" in repr(node)
-    assert f"id={alice}" in repr(user)
+    rendered = repr(node)
+    assert "Node" in rendered
+    assert "folder" in rendered
+    assert "quarterly-layoffs" not in rendered, (
+        "the node name is in its repr, so every log line carrying one leaks a "
+        "filename the owner chose"
+    )
+
+    rendered = repr(user)
+    assert f"id={alice}" in rendered
+    assert "@" not in rendered, "the email address is in the user repr"

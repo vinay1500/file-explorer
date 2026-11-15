@@ -539,11 +539,23 @@ def test_a_body_full_of_unknown_fields_does_not_amplify(client: FlaskClient) -> 
     assert response.status_code == 422
 
     body = response.get_json()
-    reported = body["errors"]
-    flattened = json.dumps(reported)
-    assert len(reported) <= 21, f"{len(reported)} fields echoed back from one request"
+    flattened = json.dumps(body["errors"])
+
+    # webargs nests the messages under their location, so `body["errors"]` has
+    # one key -- `"json"` -- however many fields were sent. Counting that was
+    # counting nothing: `MAX_ECHOED_FIELDS = 10_000` survived it. Count the
+    # leaves.
+    def leaves(node: object) -> int:
+        if isinstance(node, dict):
+            return sum(leaves(v) for v in node.values()) or len(node)
+        return 1
+
+    echoed = leaves(body["errors"])
+    assert echoed <= 21, f"{echoed} fields echoed back from a {len(noisy)}-field request"
     assert "more" in flattened, "the response did not say it had been truncated"
-    assert len(response.data) < 4096, f"a 1000-field request produced {len(response.data)} bytes"
+    assert len(response.data) < 4096, (
+        f"a {len(noisy)}-field request produced {len(response.data)} bytes"
+    )
 
 
 @pytest.mark.invariant
