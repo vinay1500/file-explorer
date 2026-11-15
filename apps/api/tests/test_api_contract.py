@@ -1,0 +1,289 @@
+"""The HTTP contract.
+
+These assert what a client can rely on, which is a different question from
+whether the tree logic is right — that is covered by the service tests against
+real PostgreSQL. What matters here is that every failure looks the same, that
+nothing leaks, and that the generated document describes the API that exists.
+
+The sharpest one is `test_move_accepts_a_null_destination_in_the_document`.
+A `new_parent_id` typed as a plain integer generates a TypeScript client that
+cannot express move-to-root, so the frontend grows a workaround and the feature
+quietly stops working. That is F-06, and it is invisible in Python.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Iterator
+
+import pytest
+from flask import Flask
+from flask.testing import FlaskClient
+
+ACTOR_HEADERS: dict[str, str] = {}
+
+
+@pytest.fixture
+def client(app: Flask, alice: int, session: object) -> Iterator[FlaskClient]:
+    """A test client acting as alice.
+
+    `DEV_ACTOR_ID` is set here rather than in the environment so the default --
+    unset, and therefore 401 -- stays the default everywhere else.
+    """
+    previous = app.config.get("DEV_ACTOR_ID")
+    app.config["DEV_ACTOR_ID"] = alice
+    try:
+        with app.test_client() as test_client:
+            yield test_client
+    finally:
+        app.config["DEV_ACTOR_ID"] = previous
+
+
+def _problem(response: object) -> dict[str, object]:
+    body = json.loads(response.data)  # type: ignore[attr-defined]
+    assert isinstance(body, dict)
+    return body
+
+
+# ----------------------------------------------------------- the document
+
+
+@pytest.mark.invariant
+def test_the_openapi_document_generates(client: FlaskClient) -> None:
+    spec = _problem(client.get("/api/openapi.json"))
+    assert spec["openapi"].startswith("3.")  # type: ignore[union-attr]
+    paths = spec["paths"]
+    assert isinstance(paths, dict)
+    for route in (
+        "/api/v1/roots",
+        "/api/v1/nodes",
+        "/api/v1/nodes/{node_id}",
+        "/api/v1/nodes/{node_id}/children",
+        "/api/v1/nodes/{node_id}/path",
+        "/api/v1/nodes/{node_id}/move",
+    ):
+        assert route in paths, f"{route} missing from the document: {sorted(paths)}"
+
+
+@pytest.mark.invariant
+def test_move_accepts_a_null_destination_in_the_document(client: FlaskClient) -> None:
+    """C-03. `new_parent_id` must be nullable in the generated schema.
+
+    Typed as a plain integer, the generated TypeScript is `new_parent_id:
+    number` and move-to-root becomes unrepresentable in the client — so the
+    frontend works around it and the feature silently stops existing. That is
+    F-06, and nothing in the Python would ever show it.
+    """
+    spec = _problem(client.get("/api/openapi.json"))
+    schemas = spec["components"]["schemas"]  # type: ignore[index]
+    move = next(s for name, s in schemas.items() if name.startswith("NodeMove"))
+    field = move["properties"]["new_parent_id"]
+    assert field.get("nullable") is True or "null" in str(field.get("type")), (
+        f"new_parent_id is not nullable in the document: {field}. "
+        "A generated client then cannot express move-to-root."
+    )
+
+
+@pytest.mark.invariant
+def test_every_route_documents_401(client: FlaskClient) -> None:
+    """Documented from day one, so M5 is not a breaking change for clients."""
+    spec = _problem(client.get("/api/openapi.json"))
+    missing = [
+        f"{method.upper()} {path}"
+        for path, methods in spec["paths"].items()  # type: ignore[union-attr]
+        for method, operation in methods.items()
+        if path.startswith("/api/v1/") and "401" not in operation.get("responses", {})
+    ]
+    assert not missing, f"routes with no documented 401: {missing}"
+
+
+# ------------------------------------------------- every failure is a problem
+
+
+@pytest.mark.invariant
+def test_an_unrouted_path_is_a_problem_document_not_html(client: FlaskClient) -> None:
+    """The handler most APIs forget. Without it this is a Werkzeug HTML page."""
+    response = client.get("/api/v1/does-not-exist")
+    assert response.status_code == 404
+    assert response.content_type.startswith("application/problem+json")
+    body = _problem(response)
+    assert body["status"] == 404
+    assert body["code"] == "NOT_FOUND"
+    assert body["instance"] == "/api/v1/does-not-exist"
+
+
+@pytest.mark.invariant
+def test_the_wrong_method_is_a_problem_document(client: FlaskClient) -> None:
+    response = client.delete("/api/v1/roots")
+    assert response.status_code == 405
+    assert response.content_type.startswith("application/problem+json")
+    assert _problem(response)["code"] == "METHOD_NOT_ALLOWED"
+
+
+@pytest.mark.invariant
+def test_an_unknown_field_is_422_not_silently_ignored(client: FlaskClient) -> None:
+    """A dropped field is how a client ships a typo and never finds out."""
+    response = client.post(
+        "/api/v1/nodes",
+        json={"name": "home", "type": "folder", "parentId": 1},  # camelCase typo
+    )
+    assert response.status_code == 422
+    assert response.content_type.startswith("application/problem+json")
+    body = _problem(response)
+    assert body["code"] == "VALIDATION_FAILED"
+    assert "parentId" in json.dumps(body["errors"])
+
+
+@pytest.mark.invariant
+def test_a_domain_error_carries_its_code_and_status(client: FlaskClient) -> None:
+    client.post("/api/v1/nodes", json={"name": "home", "type": "folder", "parent_id": None})
+    response = client.post(
+        "/api/v1/nodes", json={"name": "home", "type": "folder", "parent_id": None}
+    )
+    assert response.status_code == 409
+    body = _problem(response)
+    assert body["code"] == "DUPLICATE_NAME"
+    assert body["type"].endswith("#duplicate_name")  # type: ignore[union-attr]
+
+
+@pytest.mark.invariant
+def test_no_error_body_carries_sql_or_parameters(client: FlaskClient) -> None:
+    """The other half of A-1, asserted at the boundary a caller actually sees."""
+    responses = [
+        client.get("/api/v1/nodes/999999/children"),
+        client.get("/api/v1/nodes/999999/path"),
+        client.post("/api/v1/nodes/999999/move", json={"new_parent_id": None}),
+        client.post("/api/v1/nodes", json={"name": "x", "type": "nonsense"}),
+        client.get("/api/v1/roots?cursor=not-a-cursor"),
+    ]
+    for response in responses:
+        rendered = response.data.decode()
+        assert "[SQL:" not in rendered, f"statement leaked: {rendered[:200]}"
+        assert "parameters" not in rendered, f"parameters leaked: {rendered[:200]}"
+        assert "Traceback" not in rendered
+
+
+@pytest.mark.invariant
+def test_a_duplicate_name_response_does_not_echo_the_name(client: FlaskClient) -> None:
+    """SECURITY §3. The response says what is already in a folder, otherwise."""
+    secret = "quarterly-layoffs"
+    client.post("/api/v1/nodes", json={"name": secret, "type": "folder", "parent_id": None})
+    response = client.post(
+        "/api/v1/nodes", json={"name": secret, "type": "folder", "parent_id": None}
+    )
+    assert response.status_code == 409
+    assert secret not in response.data.decode()
+
+
+# ------------------------------------------------------------- the headers
+
+
+@pytest.mark.invariant
+def test_nothing_is_cacheable(client: FlaskClient) -> None:
+    """Every body is one owner's tree, and identity will be a cookie at M5."""
+    for response in (
+        client.get("/api/v1/roots"),
+        client.get("/api/v1/does-not-exist"),
+        client.post("/api/v1/nodes", json={"name": "a", "type": "folder", "parent_id": None}),
+    ):
+        assert response.headers.get("Cache-Control") == "no-store", (
+            f"{response.status_code} is cacheable: {response.headers.get('Cache-Control')}"
+        )
+
+
+@pytest.mark.invariant
+def test_an_oversized_body_is_rejected_before_it_is_read(client: FlaskClient) -> None:
+    response = client.post(
+        "/api/v1/nodes",
+        data=b"x" * 32768,
+        content_type="application/json",
+    )
+    assert response.status_code == 413
+    assert _problem(response)["code"] == "PAYLOAD_TOO_LARGE"
+
+
+# ------------------------------------------------------------ the happy path
+
+
+@pytest.mark.invariant
+def test_a_full_round_trip(client: FlaskClient) -> None:
+    home = _problem(
+        client.post("/api/v1/nodes", json={"name": "home", "type": "folder", "parent_id": None})
+    )
+    assert home["parent_id"] is None
+
+    doc = _problem(
+        client.post(
+            "/api/v1/nodes", json={"name": "notes.txt", "type": "file", "parent_id": home["id"]}
+        )
+    )
+    assert doc["parent_id"] == home["id"]
+
+    children = _problem(client.get(f"/api/v1/nodes/{home['id']}/children"))
+    assert [c["name"] for c in children["items"]] == ["notes.txt"]  # type: ignore[union-attr]
+
+    renamed = _problem(client.patch(f"/api/v1/nodes/{doc['id']}", json={"name": "renamed.txt"}))
+    assert renamed["name"] == "renamed.txt"
+
+    path = _problem(client.get(f"/api/v1/nodes/{doc['id']}/path"))
+    assert [p["name"] for p in path["path"]] == ["home", "renamed.txt"]  # type: ignore[union-attr]
+
+    moved = _problem(client.post(f"/api/v1/nodes/{doc['id']}/move", json={"new_parent_id": None}))
+    assert moved["parent_id"] is None, "move-to-root did not reach the root"
+
+    deleted = _problem(client.delete(f"/api/v1/nodes/{home['id']}"))
+    assert deleted["deleted"] == 1
+
+
+@pytest.mark.invariant
+def test_pagination_round_trips_through_an_opaque_cursor(
+    client: FlaskClient, make_node: Callable[..., int], alice: int, session: object
+) -> None:
+    home = _problem(
+        client.post("/api/v1/nodes", json={"name": "home", "type": "folder", "parent_id": None})
+    )
+    for n in range(5):
+        client.post(
+            "/api/v1/nodes",
+            json={"name": f"f{n}", "type": "file", "parent_id": home["id"]},
+        )
+
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(10):
+        url = f"/api/v1/nodes/{home['id']}/children?limit=2"
+        if cursor:
+            url += f"&cursor={cursor}"
+        page = _problem(client.get(url))
+        seen.extend(str(item["name"]) for item in page["items"])  # type: ignore[union-attr]
+        cursor = page["next_cursor"]  # type: ignore[assignment]
+        if cursor is None:
+            break
+
+    assert seen == ["f0", "f1", "f2", "f3", "f4"]
+    assert len(seen) == len(set(seen))
+
+
+@pytest.mark.invariant
+def test_a_malformed_cursor_is_422(client: FlaskClient) -> None:
+    response = client.get("/api/v1/roots?cursor=%%%not-base64%%%")
+    assert response.status_code == 422
+    assert _problem(response)["code"] in {"INVALID_CURSOR", "VALIDATION_FAILED"}
+
+
+# ------------------------------------------------------------- the auth seam
+
+
+@pytest.mark.invariant
+def test_no_configured_actor_is_401_not_an_open_api(app: Flask) -> None:
+    """Fails closed. A deployment that forgets `DEV_ACTOR_ID` serves nobody."""
+    previous = app.config.get("DEV_ACTOR_ID")
+    app.config["DEV_ACTOR_ID"] = None
+    try:
+        with app.test_client() as anonymous:
+            response = anonymous.get("/api/v1/roots")
+        assert response.status_code == 401
+        assert response.content_type.startswith("application/problem+json")
+        assert _problem(response)["code"] == "UNAUTHENTICATED"
+    finally:
+        app.config["DEV_ACTOR_ID"] = previous

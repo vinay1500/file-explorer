@@ -8,11 +8,16 @@ of connecting to a database.
 from __future__ import annotations
 
 from flask import Flask, current_app
+from flask.wrappers import Response
+from flask_smorest import Api
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from file_explorer import problems
+
 from file_explorer.config import Config, engine_options
-from file_explorer.extensions import db, migrate
+from file_explorer.extensions import db, limiter, migrate
+from file_explorer.schemas.node import ProblemSchema
 from file_explorer.services.tree import TreeService
 
 
@@ -33,6 +38,22 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # imported, which produces an empty migration and a confusing failure later.
     from file_explorer import models  # noqa: F401
 
+    # Registered before the blueprint, so a failure during registration is
+    # still answered as a problem document rather than as HTML.
+    problems.register(app)
+
+    limiter.init_app(app)
+
+    api = Api(app)
+    # smorest documents its own error shape by default, which is not RFC 9457.
+    # Overriding it means the generated client's error type matches what the
+    # handlers in `problems.py` actually send.
+    api.spec.components.schema("Problem", schema=ProblemSchema)
+
+    from file_explorer.blueprints.nodes import blp as nodes_blp
+
+    api.register_blueprint(nodes_blp)
+
     @app.get("/api/v1/health")
     def health() -> tuple[dict[str, str], int]:
         """Readiness, not liveness.
@@ -51,6 +72,17 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
             app.logger.exception("health check failed")
             return {"status": "degraded", "db": "unreachable"}, 503
         return {"status": "ok", "db": "ok"}, 200
+
+    @app.after_request
+    def _no_store(response: Response) -> Response:
+        """Nothing this API returns is cacheable by a shared cache.
+
+        Every body is scoped to one owner, and identity will be a cookie at M5
+        -- which a CDN does not key on. A single cached 200 would serve one
+        user's tree to the next.
+        """
+        response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
     return app
 

@@ -574,6 +574,19 @@ class TreeService:
 
     # ---------------------------------------------------------------- reads
 
+    def get(self, actor_id: int, node_id: int) -> dict[str, object]:
+        """One node as a plain dict, or `NodeNotFound`.
+
+        Exists so the HTTP layer can build a response body without reaching
+        into `_repo`. A route that touches a private is a route that will still
+        be touching it when the private changes.
+        """
+        row = self._repo.get(actor_id, node_id)
+        if row is None:
+            raise NodeNotFound
+        return {"id": row.id, "parent_id": row.parent_id, "name": row.name, "type": row.type}
+
+
     def path(self, actor_id: int, node_id: int) -> list[dict[str, object]]:
         """Breadcrumbs, root first.
 
