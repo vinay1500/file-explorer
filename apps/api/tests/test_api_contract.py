@@ -51,11 +51,13 @@ def _problem(response: object) -> dict[str, object]:
 
 
 @pytest.mark.invariant
-def test_the_openapi_document_generates(client: FlaskClient) -> None:
+def test_the_document_declares_every_route(client: FlaskClient) -> None:
+    """Renamed: "generates" was true of an empty document too."""
     spec = _problem(client.get("/api/openapi.json"))
     assert spec["openapi"].startswith("3.")  # type: ignore[union-attr]
     paths = spec["paths"]
     assert isinstance(paths, dict)
+    assert len(paths) == 6, f"expected six routes, found {sorted(paths)}"
     for route in (
         "/api/v1/roots",
         "/api/v1/nodes",
@@ -216,6 +218,14 @@ def test_an_oversized_body_is_rejected_before_it_is_read(client: FlaskClient) ->
 
 @pytest.mark.invariant
 def test_a_full_round_trip(client: FlaskClient) -> None:
+    """Create, list, rename, path, move-to-root, delete.
+
+    The mutating routes commit and then re-read in a second transaction, so
+    what comes back is what another reader would see rather than what this
+    request wrote. That is a deliberate trade -- the alternative is building
+    the body from the service's in-flight state, which can differ from what
+    landed -- and it means a concurrent change between the two can show here.
+    """
     home = _problem(
         client.post("/api/v1/nodes", json={"name": "home", "type": "folder", "parent_id": None})
     )

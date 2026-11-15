@@ -116,10 +116,11 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     _retype_default_error(api)
 
     # **After** `Api(app)`, deliberately. flask-smorest installs its own
-    # HTTPException handler during `init_app`, and Flask resolves handlers
-    # most-recently-registered-first for the same class -- so registering these
-    # earlier means smorest answers 404, 405 and 413 in its own shape while the
-    # domain errors come back as RFC 9457. A client would have to handle both,
+    # HTTPException handler during `init_app`, and Flask keeps handlers in a
+    # dict keyed by exception class -- so the later registration **replaces**
+    # the earlier one. There is no ordering and no fallthrough. Register these
+    # first and smorest's wins, which means 404, 405 and 413 come back in its
+    # shape while the domain errors are RFC 9457: a client has to handle both,
     # which is the exact failure this module exists to prevent.
     problems.register(app)
 
@@ -144,14 +145,24 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
         return {"status": "ok", "db": "ok"}, 200
 
     @app.after_request
-    def _no_store(response: Response) -> Response:
-        """Nothing this API returns is cacheable by a shared cache.
+    def _response_headers(response: Response) -> Response:
+        """Headers every response gets, whatever produced it.
 
-        Every body is scoped to one owner, and identity will be a cookie at M5
-        -- which a CDN does not key on. A single cached 200 would serve one
-        user's tree to the next.
+        `no-store` because every body is scoped to one owner, and identity
+        becomes a cookie at M5 -- which a CDN does not key on. A single cached
+        200 would serve one user's tree to the next.
+
+        `nosniff` because responses are JSON and problem+JSON, and a browser
+        that guesses otherwise about a body containing user-chosen names is a
+        browser deciding to execute them.
         """
         response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        # Flask-Limiter adds Retry-After to every response once rate-limit
+        # headers are on, including successful ones, where it means nothing and
+        # a cautious client may well honour it.
+        if response.status_code != 429:
+            response.headers.pop("Retry-After", None)
         return response
 
     return app

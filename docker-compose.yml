@@ -39,6 +39,10 @@ services:
       target: dev
     container_name: fe-api
     environment:
+      # No default in the app, so a missing value is 401 rather than open.
+      # Real authentication arrives at M5; until then this is who you are.
+      DEV_ACTOR_ID: ${DEV_ACTOR_ID:-1}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
       DATABASE_URL: postgresql://fileexplorer:localdev@postgres:5432/file_explorer
       TEST_DATABASE_URL: postgresql://fileexplorer:localdev@postgres:5432/file_explorer_test
       FLASK_DEBUG: "1"

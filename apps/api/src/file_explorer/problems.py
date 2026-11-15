@@ -46,6 +46,13 @@ TYPE_BASE = "https://github.com/vinay1500/file-explorer/blob/main/docs/errors.md
 # because the key is attacker-controlled and there is no reason to reflect
 # kilobytes of it.
 MAX_ECHOED_KEY = 64
+MAX_ECHOED_PATH = 256
+
+# A whole error document is capped too. The per-key cap above bounds each name
+# and not how many there are, so a body with ten thousand unknown fields comes
+# back ten thousand entries long -- a small request producing a large response,
+# which is the shape of an amplification bug.
+MAX_ECHOED_FIELDS = 20
 
 
 def _problem(
@@ -66,7 +73,9 @@ def _problem(
         body["detail"] = detail
     if errors:
         body["errors"] = errors
-    body["instance"] = request.path
+    # Capped. `instance` reflects the request path, which is attacker-chosen
+    # on a 404, and there is no reason to echo kilobytes of it back.
+    body["instance"] = request.path[:MAX_ECHOED_PATH]
 
     response = jsonify(body)
     response.status_code = status
@@ -90,10 +99,21 @@ def _problem(
 
 
 def _truncate_keys(messages: Any) -> Any:
-    """Cap echoed field names. The values are marshmallow's, not the client's."""
+    """Cap echoed field names, and how many of them come back.
+
+    The values are marshmallow's own wording, not the client's. The keys are
+    the client's, which is why both the length of each and the number of them
+    are bounded.
+    """
     if not isinstance(messages, dict):
         return messages
-    return {str(k)[:MAX_ECHOED_KEY]: _truncate_keys(v) for k, v in messages.items()}
+    capped = {
+        str(k)[:MAX_ECHOED_KEY]: _truncate_keys(v)
+        for k, v in list(messages.items())[:MAX_ECHOED_FIELDS]
+    }
+    if len(messages) > MAX_ECHOED_FIELDS:
+        capped["..."] = f"and {len(messages) - MAX_ECHOED_FIELDS} more"
+    return capped
 
 
 def register(app: Flask) -> None:
@@ -107,9 +127,10 @@ def register(app: Flask) -> None:
         # 500 and recorded nowhere.
         if exc.status >= 500:
             log.exception("domain error returned %s", exc.status, extra={"code": exc.code})
-        # The problem carries the class's own title and never the submitted
-        # value. A duplicate-name response that echoes the name tells anyone
-        # who can see it what is already in that folder.
+        # The class's title is the problem's `title`. There is deliberately no
+        # `detail`: the only thing that could go there is the submitted value,
+        # and a duplicate-name response that echoes the name tells anyone who
+        # can see it what is already in that folder.
         return _problem(exc.status, exc.code, exc.title)
 
     @app.errorhandler(ValidationError)

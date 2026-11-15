@@ -68,10 +68,11 @@ a problem from a body by media type rather than by guessing from the shape.
 
 ### Registration order is load-bearing
 
-flask-smorest installs its own `HTTPException` handler during `Api(app)`, and Flask resolves
-handlers for the same class most-recently-registered-first. Register `problems.py` before
-`Api(app)` and smorest answers 404, 405 and 413 in *its* shape while the domain errors come back
-as RFC 9457 — the exact split the module exists to prevent, reintroduced by two lines being in the
+flask-smorest installs its own `HTTPException` handler during `Api(app)`, and Flask keeps handlers
+in a dict keyed by exception class — so the later registration **replaces** the earlier one. There
+is no ordering and no fallthrough. Register `problems.py` before `Api(app)` and smorest's handler
+is the one that survives, so 404, 405 and 413 come back in *its* shape while the domain errors are
+RFC 9457 — the exact split the module exists to prevent, reintroduced by two lines being in the
 wrong order.
 
 ```python
@@ -85,7 +86,8 @@ problem+json".
 
 ### What is not in a problem document
 
-The `detail` is the error class's own title and never the submitted value.
+A domain problem has **no** `detail` at all. The class's title is the `title`, and the only thing
+that could go in `detail` is the submitted value.
 
 > `test_a_duplicate_name_response_does_not_echo_the_name` creates `quarterly-layoffs`, creates it
 > again, and asserts the string does not appear in the 409. A duplicate-name response that echoes
@@ -179,7 +181,7 @@ Two details make it a seam rather than a stub:
 |---|---|---|
 | `MAX_CONTENT_LENGTH` | 16 KB | A name is at most 255 characters. Werkzeug raises 413 before reading the body, so without it the limit is however much memory the worker has. |
 | Page size | 50 default, 200 maximum | A caller-supplied limit is an input, not an instruction. |
-| Rate limit | 120/minute | **In-memory, so per process.** With four workers the real limit is four times that, and a restart clears it. |
+| Rate limit | 120/minute | **In-memory, so per process** — four workers means four times the limit, and a restart clears it. The sharper one is the other direction: it keys on `remote_addr`, so behind a proxy without `ProxyFix` every caller in the world shares one bucket and the limit becomes an outage switch. `TRUST_PROXY_HOPS` decides which, and defaults to 0. |
 | `Cache-Control` | `no-store`, everywhere | Every body is one owner's tree, and identity becomes a cookie at M5 — which a CDN does not key on. |
 
 The rate limit row is the one worth reading. It is wrong anywhere but a single instance, and the
