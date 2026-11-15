@@ -43,9 +43,9 @@ blp = Blueprint(
     description="Folders and files, as a tree.",
 )
 
-# Documented on every route from day one, because `require_actor` will start
-# returning it at M5 and a client generated today should already handle it.
-_AUTH = {401: ProblemSchema}
+# 401 is declared on every route below, not because anything returns it today
+# but because `require_actor` will at M5 -- a client generated now should
+# already handle being unauthenticated.
 
 
 def _page(result: tuple[list[dict[str, object]], tuple[str, int] | None]) -> dict[str, Any]:
@@ -58,7 +58,7 @@ class Roots(MethodView):
     @blp.arguments(PageQuerySchema, location="query")
     @blp.response(200, PageSchema)
     @blp.alt_response(422, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def get(self, query: dict[str, Any]) -> dict[str, Any]:
         """One page of the caller's root folders and files."""
         actor = require_actor()
@@ -77,7 +77,7 @@ class Nodes(MethodView):
     @blp.alt_response(404, schema=ProblemSchema)
     @blp.alt_response(409, schema=ProblemSchema)
     @blp.alt_response(422, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def post(self, body: dict[str, Any]) -> dict[str, Any]:
         """Create a folder or a file. `parent_id` of null creates a root."""
         actor = require_actor()
@@ -94,7 +94,7 @@ class Node(MethodView):
     @blp.alt_response(404, schema=ProblemSchema)
     @blp.alt_response(409, schema=ProblemSchema)
     @blp.alt_response(422, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def patch(self, body: dict[str, Any], node_id: int) -> dict[str, Any]:
         """Rename a node in place."""
         actor = require_actor()
@@ -105,7 +105,7 @@ class Node(MethodView):
 
     @blp.response(200, DeletedSchema)
     @blp.alt_response(404, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def delete(self, node_id: int) -> dict[str, Any]:
         """Delete a node and everything under it."""
         actor = require_actor()
@@ -122,7 +122,7 @@ class Children(MethodView):
     @blp.alt_response(404, schema=ProblemSchema)
     @blp.alt_response(409, schema=ProblemSchema)
     @blp.alt_response(422, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def get(self, query: dict[str, Any], node_id: int) -> dict[str, Any]:
         """One page of a folder's contents. A file is a 409, not an empty page."""
         actor = require_actor()
@@ -140,7 +140,7 @@ class Children(MethodView):
 class Path(MethodView):
     @blp.response(200, PathSchema)
     @blp.alt_response(404, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def get(self, node_id: int) -> dict[str, Any]:
         """Breadcrumbs, root first."""
         return {"path": tree_service().path(require_actor(), node_id)}
@@ -154,7 +154,7 @@ class Move(MethodView):
     @blp.alt_response(409, schema=ProblemSchema)
     @blp.alt_response(422, schema=ProblemSchema)
     @blp.alt_response(503, schema=ProblemSchema)
-    @blp.doc(responses=_AUTH)
+    @blp.alt_response(401, schema=ProblemSchema)
     def post(self, body: dict[str, Any], node_id: int) -> dict[str, Any]:
         """Re-parent a node. `new_parent_id` of null moves it to the root.
 
