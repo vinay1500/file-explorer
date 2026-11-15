@@ -205,11 +205,14 @@ def test_the_models_describe_themselves(session: object, alice: int) -> None:
     Cheap, and it is the line you reach for when something has gone wrong — a
     `__repr__` that raises turns one failure into two.
     """
-    from file_explorer.models.node import Node
+    from file_explorer.models.node import Node, NodeType
     from file_explorer.models.user import User
 
-    node = Node(owner_id=alice, name="x", type="folder")
+    # NodeType, not the string: `__repr__` reads `.value`, so a plain string
+    # raises AttributeError -- which is the failure mode this test is for.
+    node = Node(owner_id=alice, name="x", type=NodeType.FOLDER)
     user = session.get(User, alice)  # type: ignore[attr-defined]
 
     assert "Node" in repr(node)
+    assert "folder" in repr(node)
     assert f"id={alice}" in repr(user)
