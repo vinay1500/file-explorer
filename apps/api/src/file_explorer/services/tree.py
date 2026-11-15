@@ -586,7 +586,6 @@ class TreeService:
             raise NodeNotFound
         return {"id": row.id, "parent_id": row.parent_id, "name": row.name, "type": row.type}
 
-
     def path(self, actor_id: int, node_id: int) -> list[dict[str, object]]:
         """Breadcrumbs, root first.
 
