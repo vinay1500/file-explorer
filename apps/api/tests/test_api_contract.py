@@ -320,8 +320,7 @@ def test_the_documented_error_shape_is_the_one_actually_sent(client: FlaskClient
     )
     for required in ("type", "title", "status"):
         assert required in properties, (
-            f"the documented error has no {required!r}, so it is not RFC 9457: "
-            f"{sorted(properties)}"
+            f"the documented error has no {required!r}: {sorted(properties)}"
         )
 
     # And the live body agrees with the document.
