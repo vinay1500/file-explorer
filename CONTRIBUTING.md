@@ -99,7 +99,7 @@ These are not general advice. They are this repository's rules.
 | Type check | `make typecheck` |
 | Regenerate API types | `make openapi` |
 | How guards were proven | `make guards`, [docs/MUTATIONS.md](docs/MUTATIONS.md) |
-| Everything CI runs | `make ci` |
+| Lint, types and tests | `make ci` (not the coverage floor — see CI) |
 
 Tests run against real PostgreSQL. A test that passes on SQLite and fails on PostgreSQL has
 proved nothing — recursive CTEs, `FOR UPDATE` and partial unique indexes all behave differently.

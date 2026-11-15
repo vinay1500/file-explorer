@@ -5,7 +5,7 @@
 
 ## There is no local runtime
 
-That is a decision, not a gap (D-13). Nothing in this project installs on the
+That is a decision, not a gap. Nothing in this project installs on the
 development machine — no PostgreSQL, no Python environment, not even the
 linter. Every command is proven in CI or it is not proven.
 

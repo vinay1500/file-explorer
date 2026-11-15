@@ -124,7 +124,12 @@ guards: ## How each guard was proven to bite, and where
 	@echo "    docs/MUTATIONS.md"
 	@echo ""
 
-ci: lint typecheck test ## Everything CI runs
+ci: lint typecheck test ## Lint, types and tests — not the coverage floor
+	@echo ""
+	@echo "  Note: CI also measures branch coverage and fails under 99.5%,"
+	@echo "  which this target does not. Coverage needs the marker split and"
+	@echo "  --cov-append across both halves; see .github/workflows/ci.yml."
+	@echo ""
 
 clean: ## Remove containers and the database volume — destroys local data
 	$(COMPOSE) down -v

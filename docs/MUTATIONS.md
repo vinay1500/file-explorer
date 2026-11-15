@@ -28,15 +28,19 @@ exists. None of that is what the test is named for.
 
 ## How
 
-1. On a throwaway branch, revert exactly one behaviour.
+1. On a throwaway branch, revert exactly one behaviour. **Assert that the edit
+   applied** — a mutation that silently does nothing is indistinguishable from
+   a guard that works, and has twice been mistaken for one here.
 2. Push. A draft pull request is needed, because CI runs on `main` and on pull
    requests, not on every branch.
 3. Read which tests went red. **Exactly the ones that describe that behaviour,
    and no others** — a mutation that reddens everything localises nothing.
 4. Close the pull request, delete the branch.
 
-Not run locally. It needs real PostgreSQL and the full suite, and this project
-has no local runtime by design (D-13). CI is where every command is proven.
+Not run locally. It needs real PostgreSQL and the full suite, and nothing in
+this project installs on the development machine — a deliberate choice, with
+the trade written up in [chapter 15](book/15-containers-and-ci.md). CI is where
+every command is proven.
 
 ## The record
 
@@ -60,7 +64,11 @@ has no local runtime by design (D-13). CI is where every command is proven.
 | 16 | Query strictness, exception headers, and the caller's identity | 3 red | 8 red; a listing returned `['mine', 'theirs']` | `43719982842` |
 | 17 | The three health-check tests deleted | coverage floor red | **every test still passed**; only the floor caught it, at 97% | `43723085822` |
 
-Rows 8, 10 and 17 are the ones worth reading.
+| 18 | Eight M4 guards removed at once | 8 red | **5 red.** Two of the eight were misapplied by the mutation script itself — one hit the first of two identical lines, the other left a decorator's indentation behind and produced a syntax error | `43727207915` |
+| 19 | The two, reapplied precisely | 2 red | 1 red. The other exposed something else entirely — see below | `43727478366` |
+| 20 | Health exemption removed, against health's own bucket | red | red | `43727642755` |
+
+Rows 8, 10, 17 and 18 are the ones worth reading.
 
 **8** is a test that could not fail, found by mutation and by nothing else.
 
@@ -73,3 +81,17 @@ pinned. The guard that works reads `pg_index`.
 tests left the suite entirely green — the same health endpoint whose
 predecessor returned a constant and stayed green for seventeen months while
 the database was gone.
+
+**18** is a mistake in the method rather than in the code, and it is the easier
+one to make. Two of the eight mutations never applied: a `str.replace(..., 1)`
+hit the first of two identical lines, and another removed `@limiter.exempt`
+without its indentation and produced a syntax error that read, at a glance,
+like a test failure. **Assert that the mutation applied.** A mutation that
+silently does nothing looks exactly like a guard that works.
+
+Run 19 then showed something the first attempt had hidden: removing the health
+exemption *still* did not redden its test, because Flask-Limiter applies
+default limits **per endpoint**. The test spent one route's budget and asked
+another, which passes either way. The configured "120 per minute" is per
+endpoint per caller, not a global ceiling, and the configuration now says so.
+That is a fact about the system found by a mutation that failed to fail.
