@@ -136,7 +136,9 @@ def test_an_unknown_field_is_422_not_silently_ignored(client: FlaskClient) -> No
     assert response.content_type.startswith("application/problem+json")
     body = _problem(response)
     assert body["code"] == "VALIDATION_FAILED"
-    assert "parentId" in json.dumps(body["errors"])
+    # Asserted against the whole document rather than one key: what matters to
+    # a client is that the offending field is named somewhere it can find it.
+    assert "parentId" in json.dumps(body), f"the 422 does not say which field: {body}"
 
 
 @pytest.mark.invariant

@@ -115,7 +115,10 @@ def register(app: Flask) -> None:
         # messages attached to `.data`. So the handler below never sees those,
         # and without this the 422 for an unknown field arrives with no
         # indication of which field -- which is most of its value.
-        errors = getattr(exc, "data", {}).get("errors") if hasattr(exc, "data") else None
+        data = getattr(exc, "data", None) or {}
+        # smorest has used both spellings across versions, so accept either
+        # rather than silently producing a 422 that names no field.
+        errors = data.get("errors") or data.get("messages")
         return _problem(
             status,
             _HTTP_CODES.get(status, "HTTP_ERROR"),
