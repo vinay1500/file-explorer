@@ -265,7 +265,15 @@ def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not() -> None
     limited = [r for r in responses if r.status_code == 429]
     allowed = [r for r in responses if r.status_code != 429]
 
-    assert limited, "the limiter never fired, so neither arm of the strip is exercised"
+    first = responses[0]
+    assert limited, (
+        "the limiter never fired after eight requests against a limit of two. "
+        f"enabled={built.config.get('RATELIMIT_ENABLED')} "
+        f"default={built.config.get('RATELIMIT_DEFAULT')!r} "
+        f"storage={built.config.get('RATELIMIT_STORAGE_URI')!r} "
+        f"headers={ {k: v for k, v in first.headers if k.lower().startswith('x-ratelimit')} } "
+        f"statuses={[r.status_code for r in responses]}"
+    )
     assert limited[0].content_type.startswith("application/problem+json")
     assert limited[0].get_json()["code"] == "RATE_LIMITED"
     assert limited[0].headers.get("Retry-After"), "a 429 with no Retry-After says nothing"
