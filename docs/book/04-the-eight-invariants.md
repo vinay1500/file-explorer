@@ -157,7 +157,8 @@ names impossible is not a safer system, only a narrower one.
 The earlier version of this chapter claimed the deny-list covered "the spoofing that actually
 matters". It did not, and the claim was too broad even for the corrected rule.
 
-**Homoglyphs are not addressed.** `report.txt` with a Greek `ο` or a Cyrillic `о` renders
+**Homoglyphs are not addressed.** `report.txt` with a Greek omicron (U+03BF) or a Cyrillic
+small o (U+043E) renders
 identically to the Latin one and passes every check here. So do visually similar spaces inside a
 name. Catching those needs a confusable-skeleton check against the Unicode security data, which
 is a different piece of work with real false-positive risk for multilingual names.
