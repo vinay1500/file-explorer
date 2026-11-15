@@ -71,6 +71,6 @@ def tree_service(session: Session | None = None) -> TreeService:
     # proxy would have forwarded to anyway, just with a type that says so.
     return TreeService(
         session if session is not None else db.session(),
-        current_app.config["MAX_TREE_DEPTH"],
-        current_app.config["MAX_NODES_PER_USER"],
+        64,  # MUTATION: hardcoded
+        50_000,  # MUTATION: hardcoded
     )

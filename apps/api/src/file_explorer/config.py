@@ -61,10 +61,10 @@ def engine_options(config: Mapping[str, Any]) -> dict[str, object]:
         "pool_pre_ping": True,
         "connect_args": {
             "options": (
-                f"-c statement_timeout={config['STATEMENT_TIMEOUT_MS']} "
-                f"-c lock_timeout={config['LOCK_TIMEOUT_MS']} "
+                f"-c statement_timeout={os.environ.get('STATEMENT_TIMEOUT_MS', '5000')} "
+                f"-c lock_timeout={os.environ.get('LOCK_TIMEOUT_MS', '3000')} "
                 "-c idle_in_transaction_session_timeout="
-                f"{config['IDLE_IN_TRANSACTION_TIMEOUT_MS']}"
+                f"{os.environ.get('IDLE_IN_TRANSACTION_TIMEOUT_MS', '10000')}"
             )
         },
     }

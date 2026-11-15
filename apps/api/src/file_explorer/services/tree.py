@@ -279,8 +279,7 @@ class TreeService:
         # the number of requests in flight. A hard one costs a per-owner
         # counter row that every create must lock, which is a worse trade for
         # a limit that exists to stop scripts rather than to bill anyone.
-        if self._repo.count_for_owner(actor_id) >= self._max_nodes:
-            raise QuotaExceeded
+        # MUTATION: no quota check
 
         level = 0
         if parent_id is not None:
