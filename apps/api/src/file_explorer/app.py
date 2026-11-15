@@ -172,7 +172,6 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
             return {"status": "degraded", "db": "unreachable"}, 503
         return {"status": "ok", "db": "ok"}, 200
 
-
     return app
 
 

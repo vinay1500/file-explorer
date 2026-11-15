@@ -324,7 +324,19 @@ jobs:
           #
           # The floor ratchets. It does not come back down without a reason in
           # the commit message.
-          coverage report --show-missing --skip-covered --precision=2 --fail-under=90
+          #
+          # 99.5 and not 100 because **one** line is out of reach:
+          # `services/tree.py:201`, `raise AssertionError("unreachable: the
+          # loop either returns or raises")`, which is unreachable by
+          # construction.
+          #
+          # An earlier version of this comment listed fourteen. Review checked
+          # each and the claim held for exactly that one; three were
+          # contradicted by techniques used elsewhere in the same change. The
+          # tests are in `tests/test_error_paths.py`. The lesson is that "hard
+          # to reach from a test" and "cannot be reached" are different claims,
+          # and only the second one belongs in a comment.
+          coverage report --show-missing --skip-covered --precision=2 --fail-under=99.5
 
       - name: Every test is marked
         run: |
