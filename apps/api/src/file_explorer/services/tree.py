@@ -309,6 +309,58 @@ class TreeService:
         if rows == 0:
             raise NodeNotFound  # deleted while we were deciding
 
+    # -------------------------------------------------------------- delete
+
+    def delete(self, actor_id: int, node_id: int) -> int:
+        """Delete a node and everything under it. Returns how many were removed.
+
+        The subtree goes through `ON DELETE CASCADE` (I3), so one statement
+        removes an arbitrary number of rows. Two consequences the caller feels:
+
+        * The count has to be taken **before** the delete, because afterwards
+          there is nothing left to count and the rowcount sees only the one row
+          the statement named.
+        * A large subtree can exceed `statement_timeout`, and it will have held
+          locks on every row for the whole budget first. That arrives as
+          `57014`, which `_with_retry` maps to 503 and deliberately does not
+          retry -- a delete that exceeded the timeout will exceed it again,
+          and the second attempt pays the same cost before failing the same
+          way.
+        """
+        return self._with_retry("delete", node_id, lambda: self._delete_once(actor_id, node_id))
+
+    def _delete_once(self, actor_id: int, node_id: int) -> int:
+        # 1. Resolve first, unlocked, so a foreign id never waits on a
+        #    stranger's transaction. Same reasoning as `move` and `create`.
+        if self._repo.get(actor_id, node_id) is None:
+            raise NodeNotFound
+
+        # 2. Lock the node before counting.
+        #
+        #    One row is enough. `create` locks its parent's entire ancestry, so
+        #    a create anywhere beneath this node already conflicts here and the
+        #    subtree cannot grow between the count and the delete. A move INTO
+        #    the subtree locks the destination chain, which also includes this
+        #    node.
+        #
+        #    A move OUT of the subtree is the one case this does not serialise:
+        #    it locks the node it moves and the destination chain, neither of
+        #    which need include this node. If it commits between the count and
+        #    the delete, the escaped subtree survives -- correctly -- and the
+        #    count is high by its size. The alternative is locking every row in
+        #    the subtree, which is the cost this design exists to avoid.
+        if not self._repo.lock_one(actor_id, node_id):
+            raise NodeNotFound  # deleted between the read and the lock
+
+        # 3. Count while holding the lock.
+        removed = self._repo.subtree_size(actor_id, node_id)
+
+        # 4. Delete the root of the subtree; the cascade does the rest.
+        if self._repo.delete_node(actor_id, node_id) == 0:
+            raise NodeNotFound
+
+        return removed
+
     # ---------------------------------------------------------------- reads
 
     def path(self, actor_id: int, node_id: int) -> list[dict[str, object]]:

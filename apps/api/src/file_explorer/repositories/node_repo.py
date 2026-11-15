@@ -133,6 +133,40 @@ _LOCK_ANCESTRY = text("""
 """)
 
 
+# Counts a subtree, and reports how deep it had to go to do it. The depth comes
+# back so the caller can tell a complete count from a truncated one -- the same
+# argument as `ancestry`: a bounded walk that returns a short answer silently is
+# worse than one that fails.
+_SUBTREE_SIZE = text("""
+    WITH RECURSIVE descendants AS (
+        SELECT id, 0 AS depth
+          FROM nodes
+         WHERE id = :node_id
+           AND owner_id = :owner_id
+        UNION ALL
+        SELECT n.id, d.depth + 1
+          FROM nodes n
+          JOIN descendants d ON n.parent_id = d.id
+         WHERE n.owner_id = :owner_id
+           AND d.depth < :max_depth
+    )
+    SELECT count(*), COALESCE(MAX(depth), 0) FROM descendants
+""")
+
+# One row, locked. `delete` holds this over its count.
+#
+# It is a single row rather than a chain, and that is enough because `create`
+# locks its parent's ENTIRE ancestry -- so a create anywhere beneath this node
+# already conflicts here, and the count cannot grow underneath the delete.
+_LOCK_ONE = text("""
+    SELECT id
+      FROM nodes
+     WHERE id = :node_id
+       AND owner_id = :owner_id
+       FOR NO KEY UPDATE
+""")
+
+
 class NodeRepository:
     def __init__(self, session: Session, max_depth: int) -> None:
         self._s = session
@@ -322,6 +356,51 @@ class NodeRepository:
                 "WHERE id = :node_id AND owner_id = :owner_id"
             ),
             {"node_id": node_id, "name": name, "owner_id": owner_id},
+        )
+        return cast("CursorResult[Any]", result).rowcount
+
+    def lock_one(self, owner_id: int, node_id: int) -> bool:
+        """Lock a single node. False if it is gone or was never the caller's."""
+        return (
+            self._s.execute(_LOCK_ONE, {"node_id": node_id, "owner_id": owner_id}).one_or_none()
+            is not None
+        )
+
+    def subtree_size(self, owner_id: int, node_id: int) -> int:
+        """How many nodes `node_id` carries, counting itself. 0 if it is not there.
+
+        Raises `TreeTooDeep` on a truncated walk, for the same reason
+        `subtree_height` does: an undercount here would be reported to the
+        caller as the number of things deleted, which is a lie about data that
+        is already gone.
+        """
+        count, deepest = self._s.execute(
+            _SUBTREE_SIZE,
+            {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
+        ).one()
+        if int(deepest) >= self._max_depth:
+            log.error(
+                "subtree count hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return int(count)
+
+    def delete_node(self, owner_id: int, node_id: int) -> int:
+        """Delete one node. Returns rows directly affected -- 1 or 0.
+
+        The subtree goes with it through `ON DELETE CASCADE`, which is I3 and
+        is the database's job, not this method's. The original schema had no
+        cascade, so SQLAlchemy nulled each child's `parent_id` instead -- and
+        NULL means root, so deleting a folder emptied it onto the top level.
+
+        The rowcount counts only this row; the cascade is invisible to it.
+        That is why the caller counts the subtree beforehand rather than
+        reading a number back from here.
+        """
+        result = self._s.execute(
+            text("DELETE FROM nodes WHERE id = :node_id AND owner_id = :owner_id"),
+            {"node_id": node_id, "owner_id": owner_id},
         )
         return cast("CursorResult[Any]", result).rowcount
 
