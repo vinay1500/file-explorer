@@ -548,7 +548,10 @@ def test_a_body_full_of_unknown_fields_does_not_amplify(client: FlaskClient) -> 
 
 @pytest.mark.invariant
 def test_a_5xx_domain_error_is_logged(
-    client: FlaskClient, session: object, alice: int, make_node: Callable[..., int],
+    client: FlaskClient,
+    session: object,
+    alice: int,
+    make_node: Callable[..., int],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """`TreeTooDeep` is a 500 whose own docstring says the alternative is silence.
