@@ -30,7 +30,7 @@ from file_explorer.errors import (
     OperationTimedOut,
     StorageError,
 )
-from file_explorer.repositories.node_repo import NodeRepository
+from file_explorer.repositories.node_repo import NodeRepository, NodeRow
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +58,38 @@ _MAX_ATTEMPTS = 3
 NODE_TYPES = frozenset({"file", "folder"})
 
 _T = TypeVar("_T")
+
+# A page cursor is the (name, id) of the last row the caller saw. It is the sort
+# key itself, not an encoded offset, which is what makes it stable while other
+# people are writing. The HTTP layer is free to encode it opaquely; the service
+# keeps it typed.
+Cursor = tuple[str, int] | None
+Page = tuple[list[dict[str, object]], Cursor]
+
+DEFAULT_PAGE = 50
+MAX_PAGE = 200
+
+# ('', 0) sorts below every stored (name, id): `ck_nodes_name_not_blank`
+# guarantees no name is empty, and the empty string is first in byte order.
+_FIRST_PAGE: tuple[str, int] = ("", 0)
+
+
+def _clamp(limit: int) -> int:
+    """A caller-supplied page size is an input, not an instruction.
+
+    Unbounded, `limit` is a denial-of-service knob: one request asks for every
+    row the owner has and holds a connection while PostgreSQL materialises it.
+    """
+    return max(1, min(limit, MAX_PAGE))
+
+
+def _fetch(limit: int) -> int:
+    """One more than the page, to learn whether another page exists."""
+    return _clamp(limit) + 1
+
+
+def _start(after: Cursor) -> tuple[str, int]:
+    return _FIRST_PAGE if after is None else after
 
 
 def _constraint_of(exc: IntegrityError) -> str:
@@ -360,6 +392,58 @@ class TreeService:
             raise NodeNotFound
 
         return removed
+
+    # --------------------------------------------------------------- lists
+
+    def list_children(
+        self, actor_id: int, parent_id: int, limit: int = DEFAULT_PAGE, after: Cursor = None
+    ) -> Page:
+        """One page of a folder's contents.
+
+        `after` is the `(name, id)` of the last row the caller saw; None starts
+        at the beginning. The returned cursor is None on the last page.
+
+        A missing or foreign `parent_id` is a 404, not an empty page. An empty
+        page would make "this folder has nothing in it" and "this folder is not
+        yours" the same answer, and the second one is not the caller's to know.
+        """
+        if self._repo.get(actor_id, parent_id) is None:
+            raise NodeNotFound
+        return self._with_retry(
+            "list_children",
+            parent_id,
+            lambda: self._page(
+                self._repo.list_children(actor_id, parent_id, _fetch(limit), _start(after)), limit
+            ),
+        )
+
+    def list_roots(self, actor_id: int, limit: int = DEFAULT_PAGE, after: Cursor = None) -> Page:
+        """One page of the caller's roots. No parent to check, so no 404."""
+        return self._with_retry(
+            "list_roots",
+            None,
+            lambda: self._page(
+                self._repo.list_roots(actor_id, _fetch(limit), _start(after)), limit
+            ),
+        )
+
+    @staticmethod
+    def _page(rows: list[NodeRow], limit: int) -> Page:
+        """Trim the lookahead row and turn the last one into a cursor.
+
+        One row more than the page size is fetched, and its presence is the only
+        evidence that another page exists. Returning a cursor whenever the page
+        came back full would hand the caller a cursor that leads to nothing --
+        a trailing empty page on every list whose size happens to divide evenly.
+        """
+        wanted = _clamp(limit)
+        has_more = len(rows) > wanted
+        rows = rows[:wanted]
+        items = [
+            {"id": r.id, "parent_id": r.parent_id, "name": r.name, "type": r.type} for r in rows
+        ]
+        cursor = (rows[-1].name, rows[-1].id) if has_more and rows else None
+        return items, cursor
 
     # ---------------------------------------------------------------- reads
 
