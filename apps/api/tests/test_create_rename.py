@@ -554,3 +554,31 @@ def test_no_node_can_be_created_past_the_cap_while_the_chain_moves(
         f"{deepest[0]!r} sits at level {deepest[1]} against a cap of {cap}. "
         f"create locked a chain from one snapshot and measured another. {outcome}"
     )
+
+
+@pytest.mark.invariant
+def test_the_ancestor_check_refuses_to_answer_from_a_truncated_walk(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """Gate 3 MINOR. `is_ancestor_of` was the one bounded walk with no check.
+
+    It returns a boolean, so a truncated walk does not look wrong — it looks
+    like "no, not an ancestor" about a node that is one. That is the cycle
+    check failing open, on exactly the data the depth bound exists to protect
+    it from.
+
+    Nothing caught it because `_move_once` happens to call `lock_move_participants`
+    before this, and that walk raises first. Statement ordering is not a guard.
+    """
+    svc = TreeService(session, 4)
+
+    parent: int | None = None
+    for level in range(7):  # 7 levels against a cap of 4
+        parent = make_node(alice, f"L{level}", parent_id=parent)
+    deepest = parent
+    root = int(session.execute(text("SELECT id FROM nodes WHERE parent_id IS NULL")).scalar_one())
+    session.commit()
+
+    assert deepest is not None
+    with pytest.raises(TreeTooDeep):
+        svc._repo.is_ancestor_of(alice, root, deepest)
