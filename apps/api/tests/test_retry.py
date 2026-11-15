@@ -56,7 +56,14 @@ def retry_log() -> Iterator[list[logging.LogRecord]]:
 
 
 def _retries(records: list[logging.LogRecord]) -> int:
-    return sum(1 for r in records if "contention" in r.getMessage())
+    """Records that announce a retry, not every record mentioning contention.
+
+    Matching "contention" counted the give-up line too, which says "gave up on
+    contention" — so a bounded loop looked like it had run one extra pass.
+    "retrying" is what the retry lines have in common, and it picks up the
+    ancestry-shift retry as well as the sqlstate ones.
+    """
+    return sum(1 for r in records if "retrying" in r.getMessage())
 
 
 def _wait_for(predicate: Callable[[], bool], seconds: float = 5.0) -> bool:
