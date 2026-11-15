@@ -17,6 +17,7 @@ so M5 is not a breaking change for it either.
 from __future__ import annotations
 
 from flask import current_app
+from werkzeug.datastructures import WWWAuthenticate
 from werkzeug.exceptions import Unauthorized
 
 
@@ -37,8 +38,7 @@ def require_actor() -> int:
         # The description says nothing about how this service is configured.
         # The earlier one named the missing setting, which told an
         # unauthenticated caller about the deployment's auth posture.
-        raise Unauthorized(
-            "Authentication is required.",
-            www_authenticate='Bearer realm="file-explorer"',
-        )
+        challenge = WWWAuthenticate("Bearer")
+        challenge.realm = "file-explorer"
+        raise Unauthorized("Authentication is required.", www_authenticate=challenge)
     return int(actor)
