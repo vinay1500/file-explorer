@@ -38,10 +38,6 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # imported, which produces an empty migration and a confusing failure later.
     from file_explorer import models  # noqa: F401
 
-    # Registered before the blueprint, so a failure during registration is
-    # still answered as a problem document rather than as HTML.
-    problems.register(app)
-
     limiter.init_app(app)
 
     api = Api(app)
@@ -53,6 +49,14 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     from file_explorer.blueprints.nodes import blp as nodes_blp
 
     api.register_blueprint(nodes_blp)
+
+    # **After** `Api(app)`, deliberately. flask-smorest installs its own
+    # HTTPException handler during `init_app`, and Flask resolves handlers
+    # most-recently-registered-first for the same class -- so registering these
+    # earlier means smorest answers 404, 405 and 413 in its own shape while the
+    # domain errors come back as RFC 9457. A client would have to handle both,
+    # which is the exact failure this module exists to prevent.
+    problems.register(app)
 
     @app.get("/api/v1/health")
     def health() -> tuple[dict[str, str], int]:

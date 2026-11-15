@@ -88,11 +88,16 @@ def test_move_accepts_a_null_destination_in_the_document(client: FlaskClient) ->
 def test_every_route_documents_401(client: FlaskClient) -> None:
     """Documented from day one, so M5 is not a breaking change for clients."""
     spec = _problem(client.get("/api/openapi.json"))
+    verbs = {"get", "post", "put", "patch", "delete", "head", "options"}
     missing = [
         f"{method.upper()} {path}"
         for path, methods in spec["paths"].items()  # type: ignore[union-attr]
         for method, operation in methods.items()
-        if path.startswith("/api/v1/") and "401" not in operation.get("responses", {})
+        # A path item also carries non-operation keys such as `parameters`,
+        # whose value is a list rather than an operation object.
+        if method in verbs
+        and path.startswith("/api/v1/")
+        and "401" not in operation.get("responses", {})
     ]
     assert not missing, f"routes with no documented 401: {missing}"
 
