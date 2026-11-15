@@ -6,8 +6,16 @@ carrying a NUL the driver cannot even send, two names that look identical on
 screen and are different byte strings, and a name that renders as something
 other than what it is.
 
-The last one is the interesting case for a file manager, because the whole UI
-is a list of names a person reads and clicks.
+The last one matters most for a file manager, because the whole interface is a
+list of names a person reads and clicks.
+
+**What this does not cover.** Homoglyphs across scripts -- Latin `o`, Greek
+`ο`, Cyrillic `о` -- render identically and are not addressed here. So do
+visually similar spaces inside a name. Both need a confusable-skeleton check
+against the Unicode security data, which is a different piece of work with
+real false-positive risk for multilingual names. What is covered is narrower
+and stated as such: **look-alikes built from characters that render as
+nothing, and names that reorder their own display.**
 """
 
 from __future__ import annotations
@@ -17,39 +25,74 @@ import unicodedata
 from file_explorer.errors import InvalidName
 from file_explorer.limits import MAX_NAME_LENGTH
 
-# Directional overrides and isolates -- the Trojan Source set. These reorder
-# how the rest of the string renders, so `report` + an override can display as
-# `report.txt` while being something else entirely. There is no legitimate use
-# for one inside a filename.
-_BIDI_CONTROL = frozenset(range(0x202A, 0x202F)) | frozenset(range(0x2066, 0x206A))
-
-# Invisible characters with no text-shaping role: zero-width space, word
-# joiner, and the byte-order mark. Two names differing only by one of these
-# look identical in every font, so a person cannot tell which they are clicking.
-_INVISIBLE = frozenset({0x200B, 0x2060, 0xFEFF})
-
-# C0 controls and DEL, then C1. NUL is the sharp one -- PostgreSQL text cannot
-# hold it at all, so without this check it surfaces as a driver ValueError
-# rather than a 422. The rest break terminals, logs and filenames.
-_CONTROL = frozenset(range(0x00, 0x20)) | {0x7F} | frozenset(range(0x80, 0xA0))
-
-FORBIDDEN = _CONTROL | _BIDI_CONTROL | _INVISIBLE
-
-# NOT forbidden, deliberately:
+# Rejected by Unicode general category rather than by an enumerated list.
 #
-#   U+200C ZERO WIDTH NON-JOINER and U+200D ZERO WIDTH JOINER carry meaning in
-#   Persian, Arabic and several Indic scripts -- they are the difference
-#   between two spellings, not decoration. Banning them would make a class of
-#   perfectly ordinary names unrepresentable.
+# The list came first and the list was wrong: it named three invisible
+# characters with no stated selection rule, so SOFT HYPHEN, MONGOLIAN VOWEL
+# SEPARATOR and the rest went straight through, and the next one to come up
+# would have been another patch. A category covers the class.
 #
-#   U+200E LEFT-TO-RIGHT MARK and U+200F RIGHT-TO-LEFT MARK are marks, not
-#   overrides: they resolve direction for a neighbouring character rather than
-#   reordering the string. Mixed-direction names need them.
+#   Cc  C0 and C1 controls, and DEL. NUL is the sharp one -- PostgreSQL text
+#       cannot hold it, so without this it surfaces as a driver ValueError
+#       rather than a 422. The rest break terminals, logs and filenames.
+#   Cf  Format characters. This is the whole invisible class: the directional
+#       overrides and isolates (the Trojan Source set), ZERO WIDTH SPACE, WORD
+#       JOINER, the byte-order mark, SOFT HYPHEN, and anything added later.
+#   Cs  Surrogates. A lone surrogate cannot be encoded to UTF-8 at all and
+#       fails inside the driver, which is the NUL problem again.
+#   Zl  LINE SEPARATOR, Zp PARAGRAPH SEPARATOR. `str.strip()` removes these at
+#       the edges and not in the middle, where they do exactly what the control
+#       characters do.
+REJECTED_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+# Allowed back in, each for a reason.
 #
-# Both are judgement calls, and both widen the attack surface slightly. The
-# trade accepted here is that a name must be *representable* in the user's own
-# language; the spoofing that actually matters -- a name that renders as a
-# different name -- needs the override set above, which is blocked.
+#   U+200C ZWNJ and U+200D ZWJ are the difference between two spellings in
+#   Persian, Arabic and several Indic scripts. They are orthography, not
+#   decoration.
+#
+#   U+200E LRM, U+200F RLM and U+061C ALM are *marks*: they give a neighbouring
+#   character a direction rather than reordering the string, which is what the
+#   override set does. Mixed-direction names need them, and ALM is the Arabic
+#   counterpart of the other two -- leaving it out while allowing them would be
+#   an arbitrary line drawn at the edge of one alphabet.
+#
+# Each of these widens the attack surface slightly. The trade is deliberate: a
+# name has to be representable in the writer's own language, and a deny-list
+# that makes ordinary Persian or Arabic names impossible is not a safer system,
+# only a narrower one.
+ALLOWED_FORMAT = frozenset(
+    {
+        "\u200c",  # ZERO WIDTH NON-JOINER
+        "\u200d",  # ZERO WIDTH JOINER
+        "\u200e",  # LEFT-TO-RIGHT MARK
+        "\u200f",  # RIGHT-TO-LEFT MARK
+        "\u061c",  # ARABIC LETTER MARK
+    }
+)
+
+# Characters that render as nothing but are *letters* by category, so no rule
+# above reaches them. U+3164 HANGUL FILLER is the one people actually use for
+# this; the others are its relatives. U+034F COMBINING GRAPHEME JOINER is a
+# mark, invisible, and has no business in a filename.
+REJECTED_EXPLICITLY = frozenset(
+    {
+        "\u115f",  # HANGUL CHOSEONG FILLER
+        "\u1160",  # HANGUL JUNGSEONG FILLER
+        "\u3164",  # HANGUL FILLER
+        "\uffa0",  # HALFWIDTH HANGUL FILLER
+        "\u034f",  # COMBINING GRAPHEME JOINER
+    }
+)
+
+
+def is_rejected(char: str) -> bool:
+    """Whether a single character may not appear in a name."""
+    if char in ALLOWED_FORMAT:
+        return False
+    if char in REJECTED_EXPLICITLY:
+        return True
+    return unicodedata.category(char) in REJECTED_CATEGORIES
 
 
 def clean(raw: object) -> str:
@@ -75,9 +118,8 @@ def clean(raw: object) -> str:
     if not name:
         raise InvalidName
 
-    for char in name:
-        if ord(char) in FORBIDDEN:
-            raise InvalidName
+    if any(is_rejected(char) for char in name):
+        raise InvalidName
 
     if len(name) > MAX_NAME_LENGTH:
         raise InvalidName
