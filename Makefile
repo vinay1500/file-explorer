@@ -120,8 +120,8 @@ guards: ## How each guard was proven to bite, and where
 	@echo "  branch, pushing it, and confirming CI goes red on exactly that test."
 	@echo "  It needs CI, not a local runtime, so there is no local target for it."
 	@echo ""
-	@echo "  The record lives in the pull request that introduced each guard:"
-	@echo "    https://github.com/vinay1500/file-explorer/pulls?q=is%3Apr+is%3Aclosed"
+	@echo "  The record, with a CI run id for every one:"
+	@echo "    docs/MUTATIONS.md"
 	@echo ""
 
 ci: lint typecheck test ## Everything CI runs

@@ -98,7 +98,7 @@ These are not general advice. They are this repository's rules.
 | Lint and format | `make lint` |
 | Type check | `make typecheck` |
 | Regenerate API types | `make openapi` |
-| How guards were proven | `make guards` |
+| How guards were proven | `make guards`, [docs/MUTATIONS.md](docs/MUTATIONS.md) |
 | Everything CI runs | `make ci` |
 
 Tests run against real PostgreSQL. A test that passes on SQLite and fails on PostgreSQL has
@@ -189,7 +189,11 @@ A milestone is not finished while its chapters still describe the previous state
 - [ ] A test covers it, and the test was run and passed.
 - [ ] CI is green on the branch.
 - [ ] Every new guard was proven to bite: the behaviour it covers reverted on a
-      throwaway branch, CI confirmed red on exactly that test, branch deleted.
+      throwaway branch, CI confirmed red on **exactly** that test, branch deleted,
+      and the run recorded in [docs/MUTATIONS.md](docs/MUTATIONS.md).
+- [ ] Coverage did not fall. The floor is in CI; a drop means a branch lost its
+      only test, which is how the health check quietly went back to being
+      untested (`43723085822`).
 - [ ] OpenAPI regenerated if any endpoint or schema changed.
 - [ ] No unrelated changes, no placeholders, no secrets in the diff.
 - [ ] The affected book chapters were updated in this pull request.
