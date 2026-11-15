@@ -122,19 +122,48 @@ characters are trimmed. That leaves a surprising amount.
 The last one is why names are **NFC-normalised before storing**, in both write paths. Normalising
 at the edge is what turns a look-alike into a 409.
 
+### A list, then a rule
+
+The first version of this enumerated three invisible characters. Review took about a minute to
+find eight more walking straight past it: `U+00AD` SOFT HYPHEN, `U+180E`, `U+034F`, the four
+Hangul fillers, and `U+2028`/`U+2029` in the middle of a name where `strip()` never looks. The
+list had no stated selection rule, so the next one would have been another patch.
+
+The rule is by Unicode general category instead — `Cc`, `Cf`, `Cs`, `Zl`, `Zp` — which covers the
+whole class including characters not yet assigned. The Hangul fillers need an explicit entry
+because they are category `Lo`: they are *letters* that render as nothing, so no category rule
+reaches them.
+
 ### The deliberate holes
 
-Two classes of invisible character are allowed, and saying why is the point:
+Five format characters are allowed back in, and saying why is the point:
 
 - **ZWNJ (U+200C) and ZWJ (U+200D)** are the difference between two spellings in Persian, Arabic
   and several Indic scripts. They are orthography, not decoration.
-- **LRM (U+200E) and RLM (U+200F)** resolve direction for a neighbouring character rather than
-  reordering the string. Mixed-direction names need them.
+- **LRM (U+200E), RLM (U+200F) and ALM (U+061C)** are *marks*: they give a neighbouring character
+  a direction rather than reordering the string, which is what the override set does.
+  Mixed-direction names need them.
 
-Both widen the attack surface slightly. The trade taken is that a name must be *representable in
-the user's own language*; the spoofing that actually matters needs the override set, which is
-blocked. A deny-list that makes ordinary Persian names impossible is not a safer system, it is a
-narrower one.
+Review listed ALM among the characters that should be blocked. It is allowed here, deliberately:
+it is the Arabic counterpart of the two marks already allowed, and blocking it while permitting
+LRM and RLM would be an arbitrary line drawn at the edge of one alphabet.
+
+Each carve-out widens the attack surface slightly. The trade taken is that a name must be
+*representable in the writer's own language*. A deny-list that makes ordinary Persian or Arabic
+names impossible is not a safer system, only a narrower one.
+
+### What is explicitly out of scope
+
+The earlier version of this chapter claimed the deny-list covered "the spoofing that actually
+matters". It did not, and the claim was too broad even for the corrected rule.
+
+**Homoglyphs are not addressed.** `report.txt` with a Greek `ο` or a Cyrillic `о` renders
+identically to the Latin one and passes every check here. So do visually similar spaces inside a
+name. Catching those needs a confusable-skeleton check against the Unicode security data, which
+is a different piece of work with real false-positive risk for multilingual names.
+
+What *is* covered, stated narrowly: **look-alikes built from characters that render as nothing,
+and names that reorder their own display.**
 
 ---
 

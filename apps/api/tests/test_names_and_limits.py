@@ -23,7 +23,7 @@ from file_explorer.app import create_app, tree_service
 from file_explorer.config import Config, engine_options
 from file_explorer.errors import DuplicateName, InvalidName, QuotaExceeded
 from file_explorer.limits import MAX_NAME_LENGTH
-from file_explorer.names import clean
+from file_explorer.names import clean, is_rejected
 from file_explorer.services.tree import TreeService
 
 MAX_DEPTH = 64
@@ -54,6 +54,16 @@ def svc(session: Session) -> TreeService:
         ("zero width space", "doc\u200bument"),
         ("word joiner", "doc\u2060ument"),
         ("byte order mark", "doc\ufeffument"),
+        # Gate 3 found every one of these passing the old hand-written list.
+        ("soft hyphen", "doc\u00adument"),
+        ("mongolian vowel separator", "doc\u180eument"),
+        ("combining grapheme joiner", "doc\u034fument"),
+        ("hangul filler", "doc\u3164ument"),
+        ("hangul choseong filler", "doc\u115fument"),
+        ("halfwidth hangul filler", "doc\uffa0ument"),
+        ("line separator", "doc\u2028ument"),
+        ("paragraph separator", "doc\u2029ument"),
+        ("lone surrogate", "doc\ud800ument"),
     ],
 )
 def test_names_that_are_rejected(label: str, name: str) -> None:
@@ -129,6 +139,7 @@ def test_a_non_string_is_rejected_rather_than_coerced() -> None:
         ("zero width joiner", "क्\u200dष"),
         ("left-to-right mark", "file\u200e.txt"),
         ("right-to-left mark", "קובץ\u200f.txt"),
+        ("arabic letter mark", "\u0645\u0644\u0641\u061c.txt"),
         ("emoji", "holiday \U0001f334.jpg"),
         ("CJK", "年度報告.pdf"),
         ("inner spaces", "quarterly report 2026.pdf"),
@@ -151,6 +162,37 @@ def test_surrounding_whitespace_is_trimmed_not_rejected(svc: TreeService, alice:
     assert clean("  report.pdf  ") == "report.pdf"
     assert svc.create(alice, None, "  spaced  ", "folder")
     assert [str(r["name"]) for r in svc.list_roots(alice)[0]] == ["spaced"]
+
+
+@pytest.mark.invariant
+def test_the_rule_is_a_category_not_a_list() -> None:
+    """Every format character is rejected unless it is one of five carve-outs.
+
+    The first version enumerated three invisible characters with no stated
+    selection rule, and review found `U+00AD`, `U+180E`, `U+061C`, `U+034F` and
+    four Hangul fillers walking straight past it. A list has to be extended
+    every time one comes up; a category does not.
+
+    This asserts the rule across the whole code space rather than sampling it,
+    so a carve-out added later has to be declared here too.
+    """
+    carved_out = {"\u200c", "\u200d", "\u200e", "\u200f", "\u061c"}
+
+    leaked = [
+        f"U+{cp:04X}"
+        for cp in range(0x110000)
+        if unicodedata.category(chr(cp)) in {"Cc", "Cf", "Cs", "Zl", "Zp"}
+        and chr(cp) not in carved_out
+        and not is_rejected(chr(cp))
+    ]
+    assert not leaked, f"invisible or control characters that still pass: {leaked[:20]}"
+
+    broken = [c for c in carved_out if is_rejected(c)]
+    assert not broken, (
+        f"a carve-out stopped working: {[f'U+{ord(c):04X}' for c in broken]}. "
+        "ZWNJ, ZWJ and the three directional marks are orthography in Persian, "
+        "Arabic and Indic scripts, not decoration."
+    )
 
 
 # --------------------------------------------------- why NFC is the point
