@@ -290,6 +290,16 @@
             },
             "description": "Unprocessable Entity"
           },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
           "default": {
             "$ref": "#/components/responses/DEFAULT_ERROR"
           }
@@ -332,6 +342,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "default": {
             "$ref": "#/components/responses/DEFAULT_ERROR"
@@ -415,6 +435,16 @@
             },
             "description": "Unprocessable Entity"
           },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
           "default": {
             "$ref": "#/components/responses/DEFAULT_ERROR"
           }
@@ -433,10 +463,8 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": null,
               "maximum": 200,
               "minimum": 1,
-              "nullable": true,
               "type": "integer"
             }
           },
@@ -445,8 +473,6 @@
             "name": "cursor",
             "required": false,
             "schema": {
-              "default": null,
-              "nullable": true,
               "type": "string"
             }
           }
@@ -501,6 +527,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "default": {
             "$ref": "#/components/responses/DEFAULT_ERROR"
@@ -651,6 +687,16 @@
             },
             "description": "Not Found"
           },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          },
           "default": {
             "$ref": "#/components/responses/DEFAULT_ERROR"
           }
@@ -680,10 +726,8 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": null,
               "maximum": 200,
               "minimum": 1,
-              "nullable": true,
               "type": "integer"
             }
           },
@@ -692,8 +736,6 @@
             "name": "cursor",
             "required": false,
             "schema": {
-              "default": null,
-              "nullable": true,
               "type": "string"
             }
           }
@@ -728,6 +770,16 @@
               }
             },
             "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           },
           "default": {
             "$ref": "#/components/responses/DEFAULT_ERROR"
