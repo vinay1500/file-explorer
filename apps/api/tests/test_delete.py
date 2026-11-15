@@ -201,29 +201,57 @@ def test_deleting_a_missing_node_is_404(svc: TreeService, alice: int) -> None:
 
 
 @pytest.mark.concurrency
-def test_a_delete_that_exceeds_the_timeout_is_503_and_is_not_retried(
+def test_a_timed_out_delete_is_503_and_is_not_retried(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
     new_session: Callable[..., Session],
 ) -> None:
-    """57014, the reason this operation needed handling at all.
+    """57014 on the delete step maps to 503, and is not retried.
 
-    A cascading delete of a large subtree can exceed `statement_timeout` having
-    already held locks on every row for the whole budget. Retrying spends the
-    budget a second time and fails the same way, so it is mapped to 503 rather
-    than retried.
+    The realistic cause is a cascade over a large subtree, which can exceed
+    `statement_timeout` having already held locks on every row for the whole
+    budget. Retrying spends the budget again and fails the same way, so it is
+    mapped rather than retried.
+
+    Two things this test does **not** do, having been corrected on both:
+
+    * It no longer sets a 1 ms timeout and hopes. A single-row indexed SELECT
+      can finish inside a millisecond on a warm connection, so the old version
+      was flaky by construction — and when it did fire, it fired on `get()`,
+      the first statement, so the delete path was never reached at all.
+    * It does not try to build a subtree genuinely large enough to blow a
+      timeout. That is just the same race with a bigger setup cost.
+
+    Instead the sqlstate is produced deterministically at the point the real
+    one would occur: a slow statement wrapped around `delete_node`. The code
+    under test — the mapping, and that this path does not retry — is exercised
+    for real.
     """
     home = make_node(alice, "home")
+    make_node(alice, "child", parent_id=home)
     session.commit()
 
-    # One millisecond: the first statement the delete issues already exceeds it.
-    actor = new_session(statement_timeout_ms=1)
+    actor = new_session(statement_timeout_ms=100)
+    svc = TreeService(actor, MAX_DEPTH)
+    original = svc._repo.delete_node
+    calls: list[int] = []
+
+    def slow_delete(owner_id: int, node_id: int) -> int:
+        calls.append(node_id)
+        actor.execute(text("SELECT pg_sleep(0.5)"))  # exceeds the 100 ms budget
+        return original(owner_id, node_id)
+
+    svc._repo.delete_node = slow_delete  # type: ignore[method-assign]
+
     with pytest.raises(OperationTimedOut):
-        TreeService(actor, MAX_DEPTH).delete(alice, home)
+        svc.delete(alice, home)
     actor.rollback()
 
+    assert calls == [home], f"the timeout did not fire on the delete step: {calls}"
+    session.rollback()
     assert _exists(session, home), "the node was removed despite the timeout"
+    assert _count(session) == 2, "the cascade ran despite the timeout"
 
 
 @pytest.mark.concurrency

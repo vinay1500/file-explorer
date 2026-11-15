@@ -76,9 +76,17 @@ _SUBTREE_HEIGHT = text("""
 # Locks the node being moved together with the destination's ancestry chain.
 #
 # FOR NO KEY UPDATE, not FOR UPDATE: FOR UPDATE conflicts with FOR KEY SHARE,
-# the lock an INSERT takes on its parent for the foreign-key check, so holding a
-# chain under FOR UPDATE would block unrelated creates underneath it. NO KEY
+# the lock an INSERT takes on its parent for the foreign-key check. NO KEY
 # UPDATE still excludes other moves, which is all the cycle argument needs.
+#
+# What that buys, stated precisely, because the obvious reading is now wrong:
+# a held chain does not block a bare INSERT underneath it. It DOES block
+# `TreeService.create`, which takes FOR NO KEY UPDATE on the parent's own
+# ancestry (see `_LOCK_ANCESTRY`) and therefore conflicts here deliberately.
+# That serialisation is the point -- it is what keeps create's depth
+# measurement meaningful -- and it is a cost, not a free win. Chains that do
+# not overlap still do not wait on each other, which is the property that
+# actually matters at any scale.
 #
 # ORDER BY id so every transaction takes the same lock order. That is a
 # convention, not a guarantee -- a concurrent cascading delete locks in scan

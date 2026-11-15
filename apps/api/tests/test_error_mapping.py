@@ -12,7 +12,6 @@ in A-1 happens at the point of translation, before any handler could redact it.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -108,8 +107,17 @@ def test_blank_name_is_not_reported_as_a_duplicate(svc: TreeService) -> None:
 
 
 @pytest.mark.invariant
-def test_statement_timeout_is_recognised(session: Session) -> None:
-    """A-3. 57014 was neither retryable nor an IntegrityError.
+def test_timeout_sqlstate_constants() -> None:
+    """A-3. The constants only — this does not exercise the branch.
+
+    Renamed from `test_statement_timeout_is_recognised`, which was a promise it
+    could not keep: delete the whole `if sqlstate == TIMEOUT:` branch from
+    `_with_retry` and every assertion below still holds. The behaviour is
+    covered by `test_retry.py::test_statement_timeout_becomes_503_and_is_not_retried`.
+    It also took a `session` fixture it never used, so it paid for a database
+    and a TRUNCATE to compare three module constants to themselves.
+
+    Kept, because pinning the constants is worth one cheap test.
 
     A cascading delete of a large subtree that exceeds `statement_timeout`
     reached the caller as an unhandled driver error, after the statement had
@@ -132,13 +140,15 @@ def test_statement_timeout_is_recognised(session: Session) -> None:
 
 
 @pytest.mark.invariant
-def test_statement_timeout_really_raises_57014(
-    session: Session, alice: int, make_node: Callable[..., int]
-) -> None:
-    """A-3, proving the sqlstate rather than assuming it."""
-    make_node(alice, "docs")
-    session.commit()
+def test_postgres_raises_57014_on_statement_timeout(session: Session) -> None:
+    """A-3. That PostgreSQL really answers 57014, rather than assuming it.
 
+    Renamed: this asserts a property of PostgreSQL, not of `TreeService` —
+    delete the service entirely and it passes. That is fine for what it is, a
+    check that the constant the mapping keys on is the one the database
+    actually sends, but the old name claimed more. Its `make_node` setup was
+    unrelated to anything it asserted and is gone.
+    """
     session.execute(text("SET LOCAL statement_timeout = 1"))
     with pytest.raises(OperationalError) as caught:
         session.execute(text("SELECT pg_sleep(1)"))
