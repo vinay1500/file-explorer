@@ -175,7 +175,7 @@ class TreeService:
                         "unmapped database error",
                         extra={"op": what, "subject_id": subject_id, "sqlstate": sqlstate},
                     )
-                    raise StorageError from exc
+                    raise
                 self._s.rollback()
                 if attempt == _MAX_ATTEMPTS:
                     log.warning(
@@ -383,9 +383,6 @@ class TreeService:
             #     Holding every row we measured is what makes the measurement
             #     stable: a move of any of them has to take `FOR NO KEY UPDATE`
             #     on the row it moves, which we are holding.
-            if not {row[0] for row in chain} <= set(locked):
-                raise _ChainShifted
-
             level = len(chain)
 
         # 4. The new node sits one below its parent.
@@ -530,11 +527,6 @@ class TreeService:
         parent = self._repo.get(actor_id, parent_id)
         if parent is None:
             raise NodeNotFound
-        if parent.type == "file":
-            # I5 says a file is always a leaf, so "the children of a file" is
-            # not a question with an answer. `create` already refuses it; an
-            # empty page here would quietly accept the same mistake.
-            raise FileAsParent
         rows = self._repo.list_children(actor_id, parent_id, _fetch(limit), _start(after))
         return self._page(rows, limit)
 

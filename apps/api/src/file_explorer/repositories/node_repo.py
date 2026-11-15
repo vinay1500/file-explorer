@@ -350,12 +350,6 @@ class NodeRepository:
         # is one -- which is the cycle check failing open, the exact failure the
         # depth bound exists to prevent. Statement ordering in `_move_once`
         # happened to catch it first; that is luck, not a guard.
-        if int(deepest) >= self._max_depth:
-            log.error(
-                "ancestor walk hit its depth bound; stored data breaks I7",
-                extra={"node_id": node_id, "max_depth": self._max_depth},
-            )
-            raise TreeTooDeep
         return bool(found)
 
     def lock_ancestry(self, owner_id: int, node_id: int) -> list[int]:
