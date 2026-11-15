@@ -73,6 +73,7 @@ class _ChainShifted(Exception):
     being the chain we needed.
     """
 
+
 # A page cursor is the (name, id) of the last row the caller saw. It is the sort
 # key itself, not an encoded offset, which is what makes it stable while other
 # people are writing. The HTTP layer is free to encode it opaquely; the service
