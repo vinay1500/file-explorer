@@ -170,3 +170,46 @@ def test_the_error_response_component_is_retyped_or_says_why(
 
     warnings = [r.getMessage() for r in caplog.records if "retype" in r.getMessage()]
     assert not warnings, f"the retype reported a problem: {warnings}"
+
+
+@pytest.mark.invariant
+def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem() -> None:
+    """The `ValidationError` handler, which no HTTP request reaches.
+
+    flask-smorest catches marshmallow inside `@blp.arguments` and re-raises it
+    as an `HTTPException`, so the dedicated handler never runs through a route.
+    It is still the right handler for a `ValidationError` raised anywhere else
+    — and an untested handler is one that is wrong the first time it matters.
+    """
+    from marshmallow import ValidationError
+
+    built = create_app(Config)
+
+    @built.get("/api/v1/validate")
+    def _validate() -> str:
+        raise ValidationError({"name": ["Not a valid string."]})
+
+    response = built.test_client().get("/api/v1/validate")
+
+    assert response.status_code == 422
+    assert response.content_type.startswith("application/problem+json")
+    body = response.get_json()
+    assert body["code"] == "VALIDATION_FAILED"
+    assert body["errors"] == {"name": ["Not a valid string."]}
+
+
+@pytest.mark.invariant
+def test_the_models_describe_themselves(session: object, alice: int) -> None:
+    """`__repr__` is debugging infrastructure, so it should not be the thing that breaks.
+
+    Cheap, and it is the line you reach for when something has gone wrong — a
+    `__repr__` that raises turns one failure into two.
+    """
+    from file_explorer.models.node import Node
+    from file_explorer.models.user import User
+
+    node = Node(owner_id=alice, name="x", type="folder")
+    user = session.get(User, alice)  # type: ignore[attr-defined]
+
+    assert "Node" in repr(node)
+    assert f"id={alice}" in repr(user)
