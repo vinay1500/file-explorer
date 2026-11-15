@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 import random
 import time
+from collections.abc import Callable
+from typing import TypeVar
 
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
@@ -23,6 +25,7 @@ from file_explorer.errors import (
     DuplicateName,
     FileAsParent,
     InvalidName,
+    InvalidType,
     NodeNotFound,
     OperationTimedOut,
     StorageError,
@@ -50,6 +53,12 @@ TIMEOUT = "57014"
 
 _MAX_ATTEMPTS = 3
 
+# The enum's two values. Checked here because a bad value reaches PostgreSQL as
+# a DataError, not an IntegrityError, so it would bypass _translate entirely.
+NODE_TYPES = frozenset({"file", "folder"})
+
+_T = TypeVar("_T")
+
 
 def _constraint_of(exc: IntegrityError) -> str:
     """The constraint a violation names, or "" if the driver did not say."""
@@ -62,6 +71,50 @@ class TreeService:
         self._s = session
         self._repo = NodeRepository(session, max_depth)
         self._max_depth = max_depth
+
+    # ---------------------------------------------------------------- retry
+
+    def _with_retry(self, what: str, node_id: int | None, run: Callable[[], _T]) -> _T:
+        """Run `run`, retrying the contention sqlstates a bounded number of times.
+
+        Shared by every operation that takes row locks, so they cannot drift
+        apart on which failures are transient. `rename` is in here too: its
+        UPDATE waits on the same `FOR NO KEY UPDATE` a move holds, so it sees
+        `55P03` for exactly the same reason.
+
+        **Transaction contract.** This does not commit. On a retryable failure
+        it *does* roll back, because the failed transaction cannot be
+        continued, and that discards any uncommitted work the caller had in the
+        same transaction. Call these with nothing else pending.
+        """
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            try:
+                return run()
+            except DBAPIError as exc:
+                sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+                if sqlstate == TIMEOUT:
+                    self._s.rollback()
+                    log.warning("statement timed out", extra={"op": what, "node_id": node_id})
+                    raise OperationTimedOut from exc
+                if sqlstate not in RETRYABLE:
+                    raise
+                self._s.rollback()
+                if attempt == _MAX_ATTEMPTS:
+                    raise
+                log.warning(
+                    "contention on %s, retrying",
+                    what,
+                    extra={
+                        "attempt": attempt,
+                        "op": what,
+                        "node_id": node_id,
+                        "sqlstate": sqlstate,
+                    },
+                )
+                # Linear backoff with jitter. Without jitter two transactions
+                # retrying in step keep colliding on the same schedule.
+                time.sleep(0.02 * attempt + random.uniform(0, 0.02))
+        raise AssertionError("unreachable: the loop either returns or raises")
 
     # ---------------------------------------------------------------- move
 
@@ -84,28 +137,7 @@ class TreeService:
         After `_MAX_ATTEMPTS` the driver error propagates. The HTTP layer maps
         it to 503 rather than 500: the request was valid and may succeed later.
         """
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
-            try:
-                self._move_once(actor_id, node_id, new_parent_id)
-                return
-            except DBAPIError as exc:
-                sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
-                if sqlstate == TIMEOUT:
-                    self._s.rollback()
-                    log.warning("statement timed out", extra={"node_id": node_id})
-                    raise OperationTimedOut from exc
-                if sqlstate not in RETRYABLE:
-                    raise
-                self._s.rollback()
-                if attempt == _MAX_ATTEMPTS:
-                    raise
-                log.warning(
-                    "contention on move, retrying",
-                    extra={"attempt": attempt, "node_id": node_id, "sqlstate": sqlstate},
-                )
-                # Linear backoff with jitter. Without jitter two transactions
-                # retrying in step keep colliding on the same schedule.
-                time.sleep(0.02 * attempt + random.uniform(0, 0.02))
+        self._with_retry("move", node_id, lambda: self._move_once(actor_id, node_id, new_parent_id))
 
     def _move_once(self, actor_id: int, node_id: int, new_parent_id: int | None) -> None:
         if node_id == new_parent_id:
@@ -185,6 +217,97 @@ class TreeService:
 
         if rows == 0:
             raise NodeNotFound
+
+    # -------------------------------------------------------------- create
+
+    def create(self, actor_id: int, parent_id: int | None, name: str, node_type: str) -> int:
+        """Create a node under `parent_id`, or at the root if None. Returns its id."""
+        return self._with_retry(
+            "create", parent_id, lambda: self._create_once(actor_id, parent_id, name, node_type)
+        )
+
+    def _create_once(self, actor_id: int, parent_id: int | None, name: str, node_type: str) -> int:
+        if node_type not in NODE_TYPES:
+            raise InvalidType
+
+        level = 0
+        if parent_id is not None:
+            # 1. Resolve with a plain read, scoped by owner. Same reasoning as
+            #    `move`: ownership is settled before any lock, so a foreign id
+            #    never makes the caller wait on a stranger's transaction.
+            parent = self._repo.get(actor_id, parent_id)
+            if parent is None:
+                raise NodeNotFound
+            if parent.type == "file":
+                raise FileAsParent  # I5 -- a file is always a leaf
+
+            # 2. Lock the parent's chain, then measure it.
+            #
+            #    The lock is what makes the measurement mean anything. Without
+            #    it a concurrent move can re-parent an ancestor between the
+            #    measurement and the insert, and the new node lands past the
+            #    cap -- which matters more than I7 alone, because both
+            #    recursive walks are bounded at `max_depth` and an over-deep
+            #    chain truncates them. A truncated ancestry makes the cycle
+            #    check fail open, so the depth cap is load-bearing for I1.
+            locked = self._repo.lock_ancestry(actor_id, parent_id)
+            if parent_id not in locked:
+                raise NodeNotFound  # deleted between the read and the lock
+
+            # 3. Measure as a FRESH statement, after the locks are held.
+            #    `FOR NO KEY UPDATE` does not refresh a recursive CTE, so the
+            #    ids returned by step 2 are not a usable ancestry.
+            #
+            #    `ancestry` returns the parent plus its ancestors, so its
+            #    length IS the parent's level, counting the root as level 1.
+            level = len(self._repo.ancestry(actor_id, parent_id))
+
+        # 4. The new node sits one below its parent.
+        if level + 1 > self._max_depth:
+            raise DepthExceeded
+
+        # 5. Insert, inside a savepoint -- a unique violation aborts the whole
+        #    transaction in PostgreSQL, so without it a duplicate name would
+        #    surface as a 500 rather than a 409.
+        #
+        #    No pre-check for the duplicate: nothing locks the parent's
+        #    existing children, so one of them can be renamed into a collision
+        #    between the check and the insert. The index is the enforcer.
+        try:
+            with self._s.begin_nested():
+                node_id = self._repo.insert_node(actor_id, parent_id, name, node_type)
+        except IntegrityError as exc:
+            raise self._translate(exc) from exc
+        return node_id
+
+    # -------------------------------------------------------------- rename
+
+    def rename(self, actor_id: int, node_id: int, new_name: str) -> None:
+        """Rename a node in place.
+
+        No depth or cycle consequences -- a rename moves nothing. The only ways
+        it can fail are "not yours or not there" and "that name is taken here",
+        and the second is left to the unique index for the same reason `move`
+        leaves it there.
+        """
+        self._with_retry("rename", node_id, lambda: self._rename_once(actor_id, node_id, new_name))
+
+    def _rename_once(self, actor_id: int, node_id: int, new_name: str) -> None:
+        node = self._repo.get(actor_id, node_id)
+        if node is None:
+            raise NodeNotFound
+
+        if node.name == new_name:
+            return  # nothing to write, and no reason to bump updated_at
+
+        try:
+            with self._s.begin_nested():
+                rows = self._repo.set_name(actor_id, node_id, new_name)
+        except IntegrityError as exc:
+            raise self._translate(exc) from exc
+
+        if rows == 0:
+            raise NodeNotFound  # deleted while we were deciding
 
     # ---------------------------------------------------------------- reads
 

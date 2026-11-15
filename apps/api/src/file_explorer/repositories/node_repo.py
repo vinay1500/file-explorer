@@ -15,12 +15,17 @@ All parameters are bound. Nothing here is composed with an f-string.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
+
+from file_explorer.errors import TreeTooDeep
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -100,6 +105,34 @@ _LOCK_CHAIN = text("""
 """)
 
 
+# Locks a node together with everything above it. `create` holds this over its
+# depth measurement: without it a concurrent move can re-parent the chain deeper
+# between the measurement and the insert, and the new node lands past the cap.
+#
+# Same FOR NO KEY UPDATE reasoning as _LOCK_CHAIN -- and the same ORDER BY id,
+# so a create and a move contending for one chain agree on lock order.
+_LOCK_ANCESTRY = text("""
+    WITH RECURSIVE ancestry AS (
+        SELECT id, parent_id, 0 AS depth
+          FROM nodes
+         WHERE id = :node_id
+           AND owner_id = :owner_id
+        UNION ALL
+        SELECT n.id, n.parent_id, a.depth + 1
+          FROM nodes n
+          JOIN ancestry a ON n.id = a.parent_id
+         WHERE n.owner_id = :owner_id
+           AND a.depth < :max_depth
+    )
+    SELECT id
+      FROM nodes
+     WHERE owner_id = :owner_id
+       AND id IN (SELECT id FROM ancestry)
+     ORDER BY id
+       FOR NO KEY UPDATE
+""")
+
+
 class NodeRepository:
     def __init__(self, session: Session, max_depth: int) -> None:
         self._s = session
@@ -123,23 +156,57 @@ class NodeRepository:
         return None if row is None else NodeRow(row[0], row[1], row[2], str(row[3]))
 
     def ancestry(self, owner_id: int, node_id: int) -> list[tuple[int, int | None, str, str, int]]:
-        """`node_id` and its ancestors, nearest first. Breadcrumbs read this."""
-        return [
+        """`node_id` and its ancestors, nearest first. Breadcrumbs read this.
+
+        Raises `TreeTooDeep` if the walk hit its bound. The CTE stops at
+        `max_depth`, so on an over-deep chain it returns a **partial** answer
+        with no error -- and a partial ancestry is worse than no ancestry,
+        because `is_ancestor_of` would then miss a genuine ancestor and the
+        cycle check would fail open. Detecting the truncation turns a silent
+        wrong answer into a loud one.
+
+        A legal node sits at level `max_depth` or less, so its ancestry is at
+        most `max_depth` rows. The recursive term runs while `depth <
+        max_depth`, so it can emit one row beyond that -- which means more than
+        `max_depth` rows can only come from data that already breaks I7.
+        """
+        rows = [
             (r[0], r[1], r[2], str(r[3]), r[4])
             for r in self._s.execute(
                 _ANCESTRY,
                 {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
             ).all()
         ]
+        if len(rows) > self._max_depth:
+            log.error(
+                "ancestry walk hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return rows
 
     def subtree_height(self, owner_id: int, node_id: int) -> int:
-        """Levels below `node_id`; 0 for a leaf."""
-        return int(
+        """Levels below `node_id`; 0 for a leaf.
+
+        Same truncation argument as `ancestry`. A root can legally carry a
+        height of `max_depth - 1`; reaching `max_depth` means the descending
+        walk was cut short and the number returned is a floor, not a height.
+        Using a floor in the move bound would let an over-deep subtree move
+        anywhere.
+        """
+        height = int(
             self._s.execute(
                 _SUBTREE_HEIGHT,
                 {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
             ).scalar_one()
         )
+        if height >= self._max_depth:
+            log.error(
+                "subtree walk hit its depth bound; stored data breaks I7",
+                extra={"node_id": node_id, "max_depth": self._max_depth},
+            )
+            raise TreeTooDeep
+        return height
 
     def lock_move_participants(
         self, owner_id: int, node_id: int, new_parent_id: int | None
@@ -199,6 +266,64 @@ class NodeRepository:
                 },
             ).scalar_one()
         )
+
+    def lock_ancestry(self, owner_id: int, node_id: int) -> list[int]:
+        """Lock `node_id` and every node above it. Returns the locked ids.
+
+        `create` calls this before measuring depth. An empty list means the
+        node is gone or was never the caller's.
+        """
+        return [
+            r[0]
+            for r in self._s.execute(
+                _LOCK_ANCESTRY,
+                {"node_id": node_id, "owner_id": owner_id, "max_depth": self._max_depth},
+            ).all()
+        ]
+
+    def insert_node(self, owner_id: int, parent_id: int | None, name: str, node_type: str) -> int:
+        """Insert one node, returning its id.
+
+        `owner_id` is written from the actor, never taken from the request, so
+        a node cannot be created into someone else's tree even if every check
+        above were removed -- and the composite foreign key then refuses a
+        parent belonging to anyone else.
+
+        The cast is explicit because `type` is an enum: a bound parameter
+        arrives as text and PostgreSQL will not coerce it in an INSERT without
+        being told to.
+        """
+        return int(
+            self._s.execute(
+                text("""
+                INSERT INTO nodes (owner_id, parent_id, name, type)
+                VALUES (:owner_id, :parent_id, :name, CAST(:type AS node_type))
+                RETURNING id
+                """),
+                {
+                    "owner_id": owner_id,
+                    "parent_id": parent_id,
+                    "name": name,
+                    "type": node_type,
+                },
+            ).scalar_one()
+        )
+
+    def set_name(self, owner_id: int, node_id: int, name: str) -> int:
+        """Rename one node. Returns rows affected.
+
+        Scoped by `owner_id` in the WHERE clause for the same reason
+        `set_parent` is: the guard has to survive the checks above being
+        deleted. 0 rows is a 404, not a success.
+        """
+        result = self._s.execute(
+            text(
+                "UPDATE nodes SET name = :name, updated_at = now() "
+                "WHERE id = :node_id AND owner_id = :owner_id"
+            ),
+            {"node_id": node_id, "name": name, "owner_id": owner_id},
+        )
+        return cast("CursorResult[Any]", result).rowcount
 
     def set_parent(self, owner_id: int, node_id: int, new_parent_id: int | None) -> int:
         """Re-parent one node. Returns rows affected.
