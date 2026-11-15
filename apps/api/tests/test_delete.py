@@ -227,51 +227,71 @@ def test_a_delete_that_exceeds_the_timeout_is_503_and_is_not_retried(
 
 
 @pytest.mark.concurrency
-def test_a_create_cannot_slip_into_a_subtree_being_deleted(
+def test_the_count_cannot_miss_a_create_that_was_in_flight(
     session: Session,
     alice: int,
     make_node: Callable[..., int],
     new_session: Callable[..., Session],
 ) -> None:
-    """The lock the delete holds over its count.
+    """`delete` must take its lock BEFORE counting, and the count is what proves it.
 
-    `create` locks its parent's entire ancestry, so a create anywhere beneath
-    the doomed node conflicts with the single row the delete locks. If it did
-    not, a node could be inserted between the count and the delete — and it
-    would then be removed by the cascade without ever being counted.
+    The first version of this test asserted that a create beneath the doomed
+    node blocks while the node is locked — by calling `lock_one` directly. That
+    passed with the lock removed from `delete` entirely, because it never went
+    through `delete` at all. Mutation testing caught it; it is the third test in
+    this project that could not fail for its stated reason.
+
+    What distinguishes the two orderings is the number `delete` returns:
+
+    * **lock, then count** — `delete` blocks on the lock before it counts, so
+      when it wakes the in-flight create has committed and the count sees all
+      three nodes.
+    * **count, then lock** — the count is a plain read and does not block, so it
+      sees two. `delete` then blocks on the DELETE, wakes, and the cascade
+      removes all three. It reports two and destroys three.
+
+    Both orderings block, and both end with an empty table. Only the returned
+    count tells them apart.
     """
     home = make_node(alice, "home")
     inner = make_node(alice, "inner", parent_id=home)
     session.commit()
 
-    deleter = new_session()
-    actor = new_session(lock_timeout_ms=3000)
+    holder = new_session()
+    actor = new_session(lock_timeout_ms=5000)
 
-    # Take the lock the delete takes, then hold it.
-    assert TreeService(deleter, MAX_DEPTH)._repo.lock_one(alice, home)
+    # In flight: created, holding FOR NO KEY UPDATE on {inner, home}, uncommitted.
+    TreeService(holder, MAX_DEPTH).create(alice, inner, "sneaky", "file")
 
+    reported: dict[str, object] = {}
     done = threading.Event()
-    outcome: dict[str, object] = {}
 
     def attempt() -> None:
         try:
-            TreeService(actor, MAX_DEPTH).create(alice, inner, "sneaky", "file")
+            reported["count"] = TreeService(actor, MAX_DEPTH).delete(alice, home)
             actor.commit()
-            outcome["result"] = "created"
         except Exception as exc:
             actor.rollback()
-            outcome["result"] = type(exc).__name__
+            reported["error"] = type(exc).__name__
         done.set()
 
     thread = threading.Thread(target=attempt, daemon=True)
     thread.start()
 
     assert not done.wait(timeout=0.5), (
-        "a create beneath the doomed node did not block, so it could be inserted "
-        "between the delete's count and the delete itself"
+        "delete did not block while a create held the chain beneath it"
     )
 
-    deleter.rollback()
-    assert done.wait(timeout=10), "the create never finished after the lock was released"
+    holder.commit()
+    assert done.wait(timeout=10), "delete never finished after the create committed"
     thread.join(timeout=5)
-    assert outcome.get("result") == "created", f"unexpected outcome: {outcome}"
+
+    assert "error" not in reported, f"delete failed: {reported}"
+    assert reported["count"] == 3, (
+        f"delete reported {reported['count']} nodes but removed 3 — it counted the "
+        "subtree before taking its lock, so a create that was in flight was "
+        "destroyed without ever being counted"
+    )
+
+    session.rollback()
+    assert _count(session) == 0, "the subtree survived"
