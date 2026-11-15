@@ -119,6 +119,20 @@ class TreeTooDeep(TreeError):
     title = "Stored tree exceeds the depth bound"
 
 
+class TreeBusy(TreeError):
+    """The tree was restructured underneath this request faster than it could finish.
+
+    503, like `OperationTimedOut`, and for the same reason: nothing about the
+    request is wrong and it may well succeed on the next attempt. It is a
+    separate class because the cause is different -- a timeout means the work
+    took too long, this means someone else's work kept invalidating ours.
+    """
+
+    code = "TREE_BUSY"
+    status = 503
+    title = "Tree is being restructured"
+
+
 class StorageError(TreeError):
     """A database error with no specific mapping.
 
