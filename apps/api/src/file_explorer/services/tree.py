@@ -355,7 +355,13 @@ class TreeService:
         # 3. Count while holding the lock.
         removed = self._repo.subtree_size(actor_id, node_id)
 
-        # 4. Delete the root of the subtree; the cascade does the rest.
+        # MUTATION: the original bug -- orphan the children instead of cascading.
+        from sqlalchemy import text as _t
+
+        self._s.execute(
+            _t("UPDATE nodes SET parent_id = NULL WHERE parent_id = :p AND owner_id = :o"),
+            {"p": node_id, "o": actor_id},
+        )
         if self._repo.delete_node(actor_id, node_id) == 0:
             raise NodeNotFound
 
