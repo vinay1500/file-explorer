@@ -168,6 +168,12 @@ def without_owner_fk(session: Session) -> Iterator[None]:
     to happen even when the test fails.
     """
     session.execute(text("ALTER TABLE nodes DROP CONSTRAINT fk_nodes_parent_same_owner"))
+    # Committed immediately. Teardown has to roll back first -- a test that
+    # failed mid-transaction leaves the session unusable otherwise -- and an
+    # uncommitted DROP would be undone by that rollback, so the ADD below would
+    # then fail with "constraint already exists" and take out every later test
+    # with it. The visible failure would be somewhere else entirely.
+    session.commit()
     try:
         yield
     finally:

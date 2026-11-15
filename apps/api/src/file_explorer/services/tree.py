@@ -121,8 +121,13 @@ class TreeService:
 
     # ---------------------------------------------------------------- retry
 
-    def _with_retry(self, what: str, node_id: int | None, run: Callable[[], _T]) -> _T:
+    def _with_retry(self, what: str, subject_id: int | None, run: Callable[[], _T]) -> _T:
         """Run `run`, retrying the contention sqlstates a bounded number of times.
+
+        `subject_id` is whatever the operation contends on, which is not always
+        the node being changed: `create` contends on its *parent*, because that
+        is the chain it locks. Logging it as `node_id` was misleading in exactly
+        the incident the line exists for.
 
         Shared by every operation that takes row locks, so they cannot drift
         apart on which failures are transient. `rename` is in here too: its
@@ -144,14 +149,14 @@ class TreeService:
                 log.warning(
                     "ancestry shifted under %s, retrying",
                     what,
-                    extra={"attempt": attempt, "op": what, "node_id": node_id},
+                    extra={"attempt": attempt, "op": what, "subject_id": subject_id},
                 )
                 time.sleep(0.02 * attempt + random.uniform(0, 0.02))
             except DBAPIError as exc:
                 sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
                 if sqlstate == TIMEOUT:
                     self._s.rollback()
-                    log.warning("statement timed out", extra={"op": what, "node_id": node_id})
+                    log.warning("statement timed out", extra={"op": what, "subject_id": subject_id})
                     raise OperationTimedOut from exc
                 if sqlstate not in RETRYABLE:
                     # Roll back for the same reason the retryable path does:
@@ -168,14 +173,14 @@ class TreeService:
                     # and without it the guarantee was only half true.
                     log.exception(
                         "unmapped database error",
-                        extra={"op": what, "node_id": node_id, "sqlstate": sqlstate},
+                        extra={"op": what, "subject_id": subject_id, "sqlstate": sqlstate},
                     )
                     raise StorageError from exc
                 self._s.rollback()
                 if attempt == _MAX_ATTEMPTS:
                     log.warning(
                         "gave up on contention",
-                        extra={"op": what, "node_id": node_id, "sqlstate": sqlstate},
+                        extra={"op": what, "subject_id": subject_id, "sqlstate": sqlstate},
                     )
                     # 503, not the driver error: the request was valid and the
                     # only thing wrong was how busy the tree was.
@@ -186,7 +191,7 @@ class TreeService:
                     extra={
                         "attempt": attempt,
                         "op": what,
-                        "node_id": node_id,
+                        "subject_id": subject_id,
                         "sqlstate": sqlstate,
                     },
                 )
@@ -435,7 +440,15 @@ class TreeService:
     # -------------------------------------------------------------- delete
 
     def delete(self, actor_id: int, node_id: int) -> int:
-        """Delete a node and everything under it. Returns how many were removed.
+        """Delete a node and everything under it. Returns the subtree size.
+
+        The count is the size of the subtree **at the moment it was counted**,
+        under the lock described below, and that is not quite the same as the
+        number of rows the cascade went on to remove: a move *out* of the
+        subtree committing in between leaves the count high by what escaped.
+        The comment on step 2 says why closing that costs more than it is
+        worth. "How many were removed" was the old wording and promised a
+        number this cannot give.
 
         The subtree goes through `ON DELETE CASCADE` (I3), so one statement
         removes an arbitrary number of rows. Two consequences the caller feels:
@@ -497,19 +510,39 @@ class TreeService:
         A missing or foreign `parent_id` is a 404, not an empty page. An empty
         page would make "this folder has nothing in it" and "this folder is not
         yours" the same answer, and the second one is not the caller's to know.
+
+        Wrapped in `_with_retry` for the **error mapping**, not the retrying: a
+        plain SELECT takes no row locks, so `40P01` and `55P03` are not
+        reachable from here. What is reachable is `57014` on a slow page and
+        any other driver error, and those must not cross this boundary carrying
+        their statement.
         """
-        if self._repo.get(actor_id, parent_id) is None:
-            raise NodeNotFound
         return self._with_retry(
             "list_children",
             parent_id,
-            lambda: self._page(
-                self._repo.list_children(actor_id, parent_id, _fetch(limit), _start(after)), limit
-            ),
+            lambda: self._list_children_once(actor_id, parent_id, limit, after),
         )
 
+    def _list_children_once(self, actor_id: int, parent_id: int, limit: int, after: Cursor) -> Page:
+        # Inside the wrapper, not before it. A `get` outside would escape as a
+        # raw driver error on any database failure, which is the leak the
+        # rest of this class was just fixed for.
+        parent = self._repo.get(actor_id, parent_id)
+        if parent is None:
+            raise NodeNotFound
+        if parent.type == "file":
+            # I5 says a file is always a leaf, so "the children of a file" is
+            # not a question with an answer. `create` already refuses it; an
+            # empty page here would quietly accept the same mistake.
+            raise FileAsParent
+        rows = self._repo.list_children(actor_id, parent_id, _fetch(limit), _start(after))
+        return self._page(rows, limit)
+
     def list_roots(self, actor_id: int, limit: int = DEFAULT_PAGE, after: Cursor = None) -> Page:
-        """One page of the caller's roots. No parent to check, so no 404."""
+        """One page of the caller's roots. No parent to check, so no 404.
+
+        Same note as `list_children` on why this is wrapped.
+        """
         return self._with_retry(
             "list_roots",
             None,
