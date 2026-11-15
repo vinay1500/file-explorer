@@ -239,3 +239,69 @@ def test_a_repr_does_not_carry_user_content(session: object, alice: int) -> None
     rendered = repr(user)
     assert f"id={alice}" in rendered
     assert "@" not in rendered, "the email address is in the user repr"
+
+
+@pytest.mark.invariant
+def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not() -> None:
+    """Both arms of the header strip, and the only test that drives a real 429.
+
+    The first version sent twelve requests against a limit of a hundred and
+    twenty, so deleting the exemption it was testing survived it. This sets the
+    limit to something a test can exceed.
+
+    It asserts both arms, because only one of them is obvious: a 429 must keep
+    `Retry-After`, and a successful response must not, where it means nothing
+    and a cautious client may honour it anyway.
+    """
+
+    class Tight(Config):
+        RATELIMIT_DEFAULT = "2 per minute"
+
+    built = create_app(Tight)
+    built.config["DEV_ACTOR_ID"] = 1
+    client = built.test_client()
+
+    responses = [client.get("/api/v1/roots") for _ in range(8)]
+    limited = [r for r in responses if r.status_code == 429]
+    allowed = [r for r in responses if r.status_code != 429]
+
+    assert limited, "the limiter never fired, so neither arm of the strip is exercised"
+    assert limited[0].content_type.startswith("application/problem+json")
+    assert limited[0].get_json()["code"] == "RATE_LIMITED"
+    assert limited[0].headers.get("Retry-After"), "a 429 with no Retry-After says nothing"
+    # The same `after_request` sets these, so their absence would mean a 429
+    # bypasses it entirely and carries neither `no-store` nor `nosniff`.
+    assert limited[0].headers.get("Cache-Control") == "no-store"
+    assert limited[0].headers.get("X-Content-Type-Options") == "nosniff"
+
+    assert allowed, "every request was limited; the successful arm is untested"
+    assert allowed[0].headers.get("Retry-After") is None, (
+        "Retry-After on a successful response means nothing and may be honoured"
+    )
+
+
+@pytest.mark.invariant
+def test_health_stays_available_while_everything_else_is_limited() -> None:
+    """The exemption, against a limit low enough to prove it exists.
+
+    A limiter that can silence the health check turns a busy minute into an
+    outage: the thing that reports whether the service is alive stops
+    answering precisely when someone is asking.
+    """
+
+    class Tight(Config):
+        RATELIMIT_DEFAULT = "2 per minute"
+
+    built = create_app(Tight)
+    built.config["DEV_ACTOR_ID"] = 1
+    client = built.test_client()
+
+    for _ in range(8):
+        client.get("/api/v1/roots")
+    assert client.get("/api/v1/roots").status_code == 429, "the limiter is not actually on"
+
+    for _ in range(8):
+        assert client.get("/api/v1/health").status_code in {200, 503}, (
+            "health was rate limited, so a busy minute silences the one endpoint "
+            "that reports whether the service is alive"
+        )
