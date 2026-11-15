@@ -71,7 +71,7 @@ def _page(result: tuple[list[dict[str, object]], tuple[str, int] | None]) -> dic
 
 @blp.route("/roots")
 class Roots(MethodView):
-    @blp.arguments(PageQuerySchema, location="query", unknown=RAISE)
+    @blp.arguments(PageQuerySchema, location="query")
     @blp.response(200, PageSchema)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(503, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
@@ -137,7 +137,7 @@ class Node(MethodView):
 
 @blp.route("/nodes/<int:node_id>/children")
 class Children(MethodView):
-    @blp.arguments(PageQuerySchema, location="query", unknown=RAISE)
+    @blp.arguments(PageQuerySchema, location="query")
     @blp.response(200, PageSchema)
     @blp.alt_response(404, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(409, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)

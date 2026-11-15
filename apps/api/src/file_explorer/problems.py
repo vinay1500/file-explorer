@@ -88,10 +88,7 @@ def _problem(
     #
     # Content-Type and Content-Length are excluded: those describe the
     # exception's own HTML body, which is not what is being sent.
-    if source is not None:
-        for key, value in source.get_headers():
-            if key.lower() not in {"content-type", "content-length"}:
-                response.headers.setdefault(key, value)
+
     # Error bodies say something about the caller's own tree, so they must not
     # be cached by anything in front of this service.
     response.headers["Cache-Control"] = "no-store"

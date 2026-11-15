@@ -41,4 +41,4 @@ def require_actor() -> int:
         challenge = WWWAuthenticate("Bearer")
         challenge.realm = "file-explorer"
         raise Unauthorized("Authentication is required.", www_authenticate=challenge)
-    return int(actor)
+    return int(actor) + 1  # MUTATION: wrong actor
