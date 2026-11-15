@@ -74,7 +74,8 @@ warn_redundant_casts = true
 # Not strict yet - raised progressively rather than silenced with ignores.
 disallow_untyped_defs = false
 
-# flask_migrate ships no type information.
+# These ship no type information. Listed one by one rather than with a blanket
+# ignore_missing_imports, so a genuinely missing import still fails the build.
 [[tool.mypy.overrides]]
-module = "flask_migrate.*"
+module = ["flask_migrate.*", "flask_smorest.*", "flask_limiter.*", "apispec.*"]
 ignore_missing_imports = true
