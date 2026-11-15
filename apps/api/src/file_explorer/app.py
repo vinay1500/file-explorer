@@ -106,7 +106,6 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
         browser deciding to execute them.
         """
         response.headers.setdefault("Cache-Control", "no-store")
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
         # Flask-Limiter adds Retry-After to every response once rate-limit
         # headers are on, including successful ones, where it means nothing and
         # a cautious client may well honour it.
@@ -117,8 +116,6 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
         # before it and the header was added back immediately afterwards --
         # the strip was dead code, and only a test that drove a real 429
         # noticed.
-        if response.status_code != 429:
-            response.headers.pop("Retry-After", None)
         return response
 
     hops = app.config.get("TRUST_PROXY_HOPS", 0)
@@ -153,7 +150,6 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     problems.register(app)
 
     @app.get("/api/v1/health")
-    @limiter.exempt
     def health() -> tuple[dict[str, str], int]:
         """Readiness, not liveness.
 

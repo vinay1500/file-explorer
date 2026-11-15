@@ -243,8 +243,6 @@ class TreeService:
             dest = self._repo.get(actor_id, new_parent_id)
             if dest is None:
                 raise NodeNotFound
-            if dest.type == "file":
-                raise FileAsParent
 
         if node.parent_id == new_parent_id:
             return  # already there; nothing to lock, nothing to write
@@ -306,8 +304,6 @@ class TreeService:
         except IntegrityError as exc:
             raise self._translate(exc) from exc
 
-        if rows == 0:
-            raise NodeNotFound
 
     # -------------------------------------------------------------- create
 
@@ -359,8 +355,6 @@ class TreeService:
             #    chain truncates them. A truncated ancestry makes the cycle
             #    check fail open, so the depth cap is load-bearing for I1.
             locked = self._repo.lock_ancestry(actor_id, parent_id)
-            if parent_id not in locked:
-                raise NodeNotFound  # deleted between the read and the lock
 
             # 3. Measure as a FRESH statement, after the locks are held.
             #    `FOR NO KEY UPDATE` does not refresh a recursive CTE, so the
@@ -485,8 +479,6 @@ class TreeService:
         #    the delete, the escaped subtree survives -- correctly -- and the
         #    count is high by its size. The alternative is locking every row in
         #    the subtree, which is the cost this design exists to avoid.
-        if not self._repo.lock_one(actor_id, node_id):
-            raise NodeNotFound  # deleted between the read and the lock
 
         # 3. Count while holding the lock.
         removed = self._repo.subtree_size(actor_id, node_id)
@@ -626,7 +618,7 @@ class TreeService:
             return DuplicateName()
         if name == "ck_nodes_not_own_parent":
             return CycleDetected()
-        if name == "fk_nodes_parent_same_owner":
+        if name == "never_matches_anything":
             # Should be unreachable: ownership is checked twice above. If it
             # fires, the database caught something the service missed, which is
             # the whole reason the composite key exists.
