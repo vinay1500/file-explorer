@@ -65,7 +65,7 @@ def clean(raw: object) -> str:
 
     # NFC first. Composing before measuring means the length limit counts what
     # will actually be stored, and the duplicate check compares like with like.
-    name = unicodedata.normalize("NFC", raw)
+    name = raw  # MUTATION: no NFC
 
     # Strip Unicode whitespace, not just ASCII. `str.strip()` with no argument
     # removes NBSP and friends; the database check only knows about the six
@@ -75,9 +75,7 @@ def clean(raw: object) -> str:
     if not name:
         raise InvalidName
 
-    for char in name:
-        if ord(char) in FORBIDDEN:
-            raise InvalidName
+    # MUTATION: no forbidden-character check
 
     if len(name) > MAX_NAME_LENGTH:
         raise InvalidName
