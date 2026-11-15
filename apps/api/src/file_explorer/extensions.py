@@ -4,6 +4,8 @@ Kept in their own module so models, the app factory and Alembic can each import
 them without importing each other.
 """
 
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import MetaData
@@ -28,3 +30,8 @@ class Base(DeclarativeBase):
 
 db = SQLAlchemy(model_class=Base)
 migrate = Migrate()
+
+# Keyed on the remote address today. At M5 this becomes the authenticated
+# actor, because an address is shared by everyone behind one NAT and is
+# trivially changed by anyone who cares.
+limiter = Limiter(key_func=get_remote_address)

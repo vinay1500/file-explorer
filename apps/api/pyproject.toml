@@ -15,6 +15,15 @@ dependencies = [
     # psycopg 3, which is what a bare postgresql:// URL resolves to in
     # SQLAlchemy 2.x. psycopg2 is in maintenance; this is the current driver.
     "psycopg[binary]>=3.2",
+    # D-03: Flask with flask-smorest and marshmallow rather than FastAPI.
+    # smorest gives the OpenAPI document and the blueprint/response decorators;
+    # marshmallow does the validation. Both are the ecosystem's defaults here,
+    # which matters more than either being the best in isolation.
+    "flask-smorest>=0.45",
+    "marshmallow>=3.21",
+    # Rate limiting. In-memory by default, which is per-process and therefore
+    # wrong across workers -- see the comment where it is configured.
+    "Flask-Limiter>=3.8",
 ]
 
 [project.optional-dependencies]
@@ -65,7 +74,8 @@ warn_redundant_casts = true
 # Not strict yet - raised progressively rather than silenced with ignores.
 disallow_untyped_defs = false
 
-# flask_migrate ships no type information.
+# These ship no type information. Listed one by one rather than with a blanket
+# ignore_missing_imports, so a genuinely missing import still fails the build.
 [[tool.mypy.overrides]]
-module = "flask_migrate.*"
+module = ["flask_migrate.*", "flask_smorest.*", "flask_limiter.*", "apispec.*"]
 ignore_missing_imports = true

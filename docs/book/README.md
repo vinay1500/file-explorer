@@ -54,7 +54,7 @@ How each failure is actually fixed, and why the obvious fix is not always enough
 |---|---|---|
 | 9 | [Recursive CTEs](09-recursive-ctes.md) | **written** |
 | 10 | [The race nobody sees](10-the-race-nobody-sees.md) | **written** |
-| 11 | The API contract | M3 |
+| 11 | [The API contract](11-the-api-contract.md) | **written** |
 | 12 | Identity and isolation | M5 |
 | 13 | Making it fast | M6 |
 

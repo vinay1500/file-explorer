@@ -574,13 +574,38 @@ class TreeService:
 
     # ---------------------------------------------------------------- reads
 
+    def get(self, actor_id: int, node_id: int) -> dict[str, object]:
+        """One node as a plain dict, or `NodeNotFound`.
+
+        Exists so the HTTP layer can build a response body without reaching
+        into `_repo`. A route that touches a private is a route that will still
+        be touching it when the private changes.
+
+        Wrapped like every sibling. Unwrapped it was the odd one out: a
+        statement timeout here escaped as a raw driver error and a 500, where
+        the same timeout one method along is a mapped 503.
+        """
+        return self._with_retry("get", node_id, lambda: self._get_once(actor_id, node_id))
+
+    def _get_once(self, actor_id: int, node_id: int) -> dict[str, object]:
+        row = self._repo.get(actor_id, node_id)
+        if row is None:
+            raise NodeNotFound
+        return {"id": row.id, "parent_id": row.parent_id, "name": row.name, "type": row.type}
+
     def path(self, actor_id: int, node_id: int) -> list[dict[str, object]]:
         """Breadcrumbs, root first.
 
         The underlying walk filters by owner in its recursive term as well as
         its anchor. Filtering only the anchor would let this climb out of the
         caller's tree and return a stranger's folder names.
+
+        Wrapped for the error mapping, like the listings: a timeout on a deep
+        walk is a 503, not a raw driver error escaping as a 500.
         """
+        return self._with_retry("path", node_id, lambda: self._path_once(actor_id, node_id))
+
+    def _path_once(self, actor_id: int, node_id: int) -> list[dict[str, object]]:
         rows = self._repo.ancestry(actor_id, node_id)
         if not rows:
             raise NodeNotFound

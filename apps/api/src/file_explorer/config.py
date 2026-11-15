@@ -38,6 +38,59 @@ class Config:
     MAX_TREE_DEPTH = int(os.environ.get("MAX_TREE_DEPTH", limits.MAX_TREE_DEPTH))
     MAX_NODES_PER_USER = int(os.environ.get("MAX_NODES_PER_USER", limits.MAX_NODES_PER_USER))
 
+    # --- HTTP layer -------------------------------------------------------
+
+    API_TITLE = "File Explorer API"
+    API_VERSION = "v1"
+    OPENAPI_VERSION = "3.0.3"
+    OPENAPI_URL_PREFIX = "/api"
+    OPENAPI_JSON_PATH = "openapi.json"
+
+    # PROPAGATE_EXCEPTIONS is deliberately NOT set.
+    #
+    # It was, with a comment claiming it made smorest return the handler's
+    # value. That is not what it does. Its only effect is in
+    # `Flask.handle_exception`: set to True, Flask re-raises to the WSGI server
+    # anything that escapes dispatch -- an `after_request` function, response
+    # processing, a failing handler -- instead of running it through the
+    # registered 500 handler. Under gunicorn that is a bare HTML page and a
+    # traceback, which is exactly what `problems.py` exists to make impossible.
+    #
+    # The `Exception` handler already covers everything raised inside dispatch,
+    # so the setting bought nothing and cost the last-resort guarantee.
+
+    # Who the API thinks is calling, until M5. No default on purpose: a
+    # deployment that forgets this fails closed with 401 rather than open on
+    # somebody's tree. See `auth.require_actor`.
+    DEV_ACTOR_ID = int(os.environ["DEV_ACTOR_ID"]) if os.environ.get("DEV_ACTOR_ID") else None
+
+    # A name is at most 255 characters, so a request body has no business being
+    # large. Werkzeug raises 413 above this, before the body is read into
+    # memory -- which is the point: without it, the limit is however much RAM
+    # the worker has.
+    MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "16384"))
+
+    # In-memory by default, which is **per process**. With more than one worker
+    # the effective limit is this times the worker count, and a restart clears
+    # it. That is honest for a single free-tier instance and wrong anywhere
+    # else; RATELIMIT_STORAGE_URI points at Redis when there is one.
+    # How many proxies sit in front of this app. 0 means none, and
+    # `remote_addr` is the caller.
+    #
+    # It matters because the rate limiter keys on `remote_addr`. Behind a load
+    # balancer without ProxyFix that is the *balancer's* address, so every
+    # caller in the world shares one bucket and the limit becomes a global
+    # outage switch. With ProxyFix and no balancer, the caller sets their own
+    # key through `X-Forwarded-For` and the limit stops existing.
+    #
+    # There is no safe default, so this is explicit and defaults to 0. Set it
+    # to the real number of hops; do not guess high.
+    TRUST_PROXY_HOPS = int(os.environ.get("TRUST_PROXY_HOPS", "0"))
+
+    RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
+    RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "120 per minute")
+    RATELIMIT_HEADERS_ENABLED = True
+
     # Exact origins, no wildcard. An empty value rejects every cross-origin
     # request, which is the correct default (F-05).
     CORS_ALLOWED_ORIGINS: ClassVar[list[str]] = [

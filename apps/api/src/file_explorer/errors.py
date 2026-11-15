@@ -74,6 +74,19 @@ class InvalidName(TreeError):
     title = "Invalid name"
 
 
+class InvalidCursor(TreeError):
+    """The pagination cursor did not decode.
+
+    422 rather than 400: the request is syntactically fine, the value in it is
+    not. A cursor is a token this service issued, so a bad one means either a
+    client built its own or one was truncated in transit.
+    """
+
+    code = "INVALID_CURSOR"
+    status = 422
+    title = "Invalid pagination cursor"
+
+
 class InvalidType(TreeError):
     """`type` is neither "file" nor "folder".
 
