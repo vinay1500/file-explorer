@@ -528,7 +528,11 @@ def test_a_body_full_of_unknown_fields_does_not_amplify(client: FlaskClient) -> 
     thousand entries. That is the shape of an amplification bug: cheap to
     send, expensive to answer.
     """
-    noisy = {f"unknown_{n}": n for n in range(1000)}
+    # 200, not 1000: a thousand of these exceeds MAX_CONTENT_LENGTH and comes
+    # back 413, which is the body-size limit doing its job and says nothing
+    # about this one. The field cap is defence in depth behind it — it bounds
+    # the response for a body that is itself perfectly reasonable.
+    noisy: dict[str, object] = {f"unknown_{n}": n for n in range(200)}
     noisy.update({"name": "home", "type": "folder"})
 
     response = client.post("/api/v1/nodes", json=noisy)

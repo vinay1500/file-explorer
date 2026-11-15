@@ -629,18 +629,22 @@ def test_a_chain_that_keeps_shifting_gives_up_rather_than_spinning(
     """
     svc = TreeService(session, MAX_DEPTH)
     root = make_node(alice, "root")
+    middle = make_node(alice, "middle", parent_id=root)
     session.commit()
 
     attempts: list[int] = []
 
     def never_covers(owner_id: int, node_id: int) -> list[int]:
+        # The parent itself, never its ancestors. An empty list would trip the
+        # "deleted between the read and the lock" check first and never reach
+        # the coverage comparison this test is about.
         attempts.append(node_id)
-        return []
+        return [middle]
 
     svc._repo.lock_ancestry = never_covers  # type: ignore[method-assign]
 
     with pytest.raises(TreeBusy) as caught:
-        svc.create(alice, root, "child", "folder")
+        svc.create(alice, middle, "child", "folder")
     session.rollback()
 
     assert caught.value.status == 503
