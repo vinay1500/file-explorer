@@ -120,6 +120,14 @@ jobs:
           ruff format --diff .
           mypy
 
+      - name: The local format checker agrees with ruff
+        working-directory: .
+        # It runs on itself as well as on the API. It exists so a formatting
+        # slip costs two seconds locally instead of ninety in CI, which is
+        # only true while it stays in agreement -- a false positive here would
+        # send somebody to "fix" something ruff is happy with.
+        run: python3 tools/check_format.py tools apps/api
+
       - name: OpenAPI document is current
         env:
           DEV_ACTOR_ID: 1
@@ -299,13 +307,42 @@ jobs:
       - name: Invariants and mapping
         # Selected by marker, not filename, so a new test file is picked up
         # without anyone remembering to edit this workflow.
-        run: pytest -m "not concurrency" -v
+        run: pytest -m "not concurrency" -v --cov=file_explorer --cov-branch --cov-report=
 
       - name: Concurrency
         # Two real connections interleaved. Timeout kept tight: these tests
         # assert that one side BLOCKS, so a hang is a failure, not patience.
         timeout-minutes: 3
-        run: pytest -m concurrency -v
+        # --cov-append: the two runs are one suite split by marker, and a
+        # coverage number from half of it would be a lie about the other half.
+        run: pytest -m concurrency -v --cov=file_explorer --cov-branch --cov-append --cov-report=
+
+      - name: Coverage
+        working-directory: apps/api
+        run: |
+          # --precision=2, because `--fail-under` compares the *rounded* total
+          # and the default precision is 0. At 98 that made the real floor
+          # 97.5: five statements could be lost in silence.
+          #
+          # --cov-branch, because statement coverage says a line ran and not
+          # which way it went. `if exc.status >= 500:` read as covered the
+          # whole time its true arm had never once executed.
+          #
+          # The floor ratchets. It does not come back down without a reason in
+          # the commit message.
+          #
+          # 99.5 and not 100 because **one** line is out of reach:
+          # `services/tree.py:201`, `raise AssertionError("unreachable: the
+          # loop either returns or raises")`, which is unreachable by
+          # construction.
+          #
+          # An earlier version of this comment listed fourteen. Review checked
+          # each and the claim held for exactly that one; three were
+          # contradicted by techniques used elsewhere in the same change. The
+          # tests are in `tests/test_error_paths.py`. The lesson is that "hard
+          # to reach from a test" and "cannot be reached" are different claims,
+          # and only the second one belongs in a comment.
+          coverage report --show-missing --skip-covered --precision=2 --fail-under=99.5
 
       - name: Every test is marked
         run: |

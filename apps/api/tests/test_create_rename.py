@@ -28,6 +28,7 @@ from file_explorer.errors import (
     InvalidName,
     InvalidType,
     NodeNotFound,
+    TreeBusy,
     TreeTooDeep,
 )
 from file_explorer.services.tree import TreeService
@@ -582,3 +583,125 @@ def test_the_ancestor_check_refuses_to_answer_from_a_truncated_walk(
     assert deepest is not None
     with pytest.raises(TreeTooDeep):
         svc._repo.is_ancestor_of(alice, root, deepest)
+
+
+@pytest.mark.invariant
+def test_the_chain_coverage_check_rejects_a_stale_lock_set(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """The guard from the M3a BLOCK, asserted directly rather than raced for.
+
+    The concurrency test that found the bug builds a four-transaction
+    interleaving. It is the right test for "can this happen", and it is a poor
+    test for "does the check work" — it depends on lock queue order, and a
+    change in timing turns it into a test of nothing.
+
+    This drives the condition the check exists for: a lock set that does not
+    cover the chain that was then measured. `create` must refuse rather than
+    measure a chain it never locked.
+    """
+    svc = TreeService(session, MAX_DEPTH)
+    root = make_node(alice, "root")
+    middle = make_node(alice, "middle", parent_id=root)
+    session.commit()
+
+    # Exactly what a move committing during the lock wait leaves behind: a set
+    # chosen under an older snapshot, missing the part of the chain that moved.
+    svc._repo.lock_ancestry = lambda owner_id, node_id: [middle]  # type: ignore[method-assign]
+
+    # The raise is the assertion. A row count after the rollback cannot fail:
+    # the guard fires at step 3a, before the insert, and `_with_retry` rolls
+    # back on the way out — so "nothing was created" is true however the check
+    # behaves, and an assertion that holds either way is not one.
+    with pytest.raises(TreeBusy):
+        svc.create(alice, middle, "child", "folder")
+    session.rollback()
+
+
+@pytest.mark.invariant
+def test_a_chain_that_keeps_shifting_gives_up_rather_than_spinning(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """Bounded, like every other retry here. A loop that never gives up is a hang.
+
+    503 rather than 409: nothing about the request is wrong, the tree was just
+    being restructured faster than one attempt could finish.
+    """
+    svc = TreeService(session, MAX_DEPTH)
+    root = make_node(alice, "root")
+    middle = make_node(alice, "middle", parent_id=root)
+    session.commit()
+
+    attempts: list[int] = []
+
+    def never_covers(owner_id: int, node_id: int) -> list[int]:
+        # The parent itself, never its ancestors. An empty list would trip the
+        # "deleted between the read and the lock" check first and never reach
+        # the coverage comparison this test is about.
+        attempts.append(node_id)
+        return [middle]
+
+    svc._repo.lock_ancestry = never_covers  # type: ignore[method-assign]
+
+    with pytest.raises(TreeBusy) as caught:
+        svc.create(alice, middle, "child", "folder")
+    session.rollback()
+
+    assert caught.value.status == 503
+    assert len(attempts) == 3, f"expected three attempts before giving up, saw {len(attempts)}"
+
+
+@pytest.mark.invariant
+def test_move_also_refuses_a_stale_lock_set(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """`move` carries the same check as `create`, and had no test for it.
+
+    Coverage found it: the `create` version is covered by the test above, and
+    `move`'s — the one the original BLOCK was actually about — was reached by
+    nothing. Two copies of a guard where only one is exercised is how the
+    unexercised one quietly stops working.
+    """
+    svc = TreeService(session, MAX_DEPTH)
+    root = make_node(alice, "root")
+    middle = make_node(alice, "middle", parent_id=root)
+    mover = make_node(alice, "mover")
+    session.commit()
+
+    original = svc._repo.lock_move_participants
+
+    def partial(owner_id: int, node_id: int, new_parent_id: int | None) -> list[int]:
+        full = original(owner_id, node_id, new_parent_id)
+        return [i for i in full if i != root]  # the chain moved; root was never locked
+
+    svc._repo.lock_move_participants = partial  # type: ignore[method-assign]
+
+    # Same as above: the guard precedes `set_parent`, so the parent column is
+    # unchanged whether or not the check works.
+    with pytest.raises(TreeBusy):
+        svc.move(alice, mover, middle)
+    session.rollback()
+
+
+@pytest.mark.invariant
+def test_deleting_a_node_that_vanishes_mid_operation_is_404(
+    session: Session, alice: int, make_node: Callable[..., int]
+) -> None:
+    """The rowcount check, which is the only thing standing between a race and a lie.
+
+    `delete` resolves, locks and counts before issuing the DELETE. If the row
+    is gone by then the statement affects nothing, and reporting success for a
+    delete that deleted nothing is how `move(999999, 7)` used to answer 200.
+    """
+    svc = TreeService(session, MAX_DEPTH)
+    doomed = make_node(alice, "doomed")
+    session.commit()
+
+    original = svc._repo.delete_node
+    svc._repo.delete_node = lambda owner_id, node_id: 0  # type: ignore[method-assign]
+    try:
+        with pytest.raises(NodeNotFound):
+            svc.delete(alice, doomed)
+    finally:
+        svc._repo.delete_node = original  # type: ignore[method-assign]
+    session.rollback()

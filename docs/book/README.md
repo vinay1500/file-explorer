@@ -64,8 +64,8 @@ The machinery around the code.
 
 | # | Chapter | Status |
 |---|---|---|
-| 14 | Testing what matters | M4 |
-| 15 | Containers and CI | M4 |
+| 14 | [Testing what matters](14-testing-what-matters.md) | **written** |
+| 15 | [Containers and CI](15-containers-and-ci.md) | **written** |
 | 16 | [Two repositories become one](16-two-repositories-become-one.md) | **written** |
 | 17 | [Architecture on no budget](17-architecture-on-no-budget.md) | **written** |
 

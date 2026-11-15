@@ -70,9 +70,17 @@ class Config:
     # the worker has.
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "16384"))
 
-    # In-memory by default, which is **per process**. With more than one worker
-    # the effective limit is this times the worker count, and a restart clears
-    # it. That is honest for a single free-tier instance and wrong anywhere
+    # Two things this is not, both worth saying because the number looks like
+    # a global ceiling and is not.
+    #
+    # It is **per endpoint**: Flask-Limiter applies default limits per route,
+    # so this is 120/minute to `/roots` *and* 120/minute to `/nodes`, per
+    # caller. Found by a mutation -- removing the health exemption survived a
+    # test that spent one route's budget and then asked another.
+    #
+    # It is **per process**: the storage is in-memory, so with more than one
+    # worker the effective limit is this times the worker count, and a restart
+    # clears it. Honest for a single free-tier instance and wrong anywhere
     # else; RATELIMIT_STORAGE_URI points at Redis when there is one.
     # How many proxies sit in front of this app. 0 means none, and
     # `remote_addr` is the caller.

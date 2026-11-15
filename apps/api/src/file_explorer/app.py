@@ -93,6 +93,34 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # imported, which produces an empty migration and a confusing failure later.
     from file_explorer import models  # noqa: F401
 
+    @app.after_request
+    def _response_headers(response: Response) -> Response:
+        """Headers every response gets, whatever produced it.
+
+        `no-store` because every body is scoped to one owner, and identity
+        becomes a cookie at M5 -- which a CDN does not key on. A single cached
+        200 would serve one user's tree to the next.
+
+        `nosniff` because responses are JSON and problem+JSON, and a browser
+        that guesses otherwise about a body containing user-chosen names is a
+        browser deciding to execute them.
+        """
+        response.headers.setdefault("Cache-Control", "no-store")
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        # Flask-Limiter adds Retry-After to every response once rate-limit
+        # headers are on, including successful ones, where it means nothing and
+        # a cautious client may well honour it.
+        #
+        # **Registered before `limiter.init_app`, deliberately.** Flask runs
+        # `after_request` functions in reverse registration order, so the one
+        # registered first runs last. Registered after the limiter, this ran
+        # before it and the header was added back immediately afterwards --
+        # the strip was dead code, and only a test that drove a real 429
+        # noticed.
+        if response.status_code != 429:
+            response.headers.pop("Retry-After", None)
+        return response
+
     hops = app.config.get("TRUST_PROXY_HOPS", 0)
     if hops:
         # Only when told. Trusting X-Forwarded-For with nothing in front means
@@ -143,27 +171,6 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
             app.logger.exception("health check failed")
             return {"status": "degraded", "db": "unreachable"}, 503
         return {"status": "ok", "db": "ok"}, 200
-
-    @app.after_request
-    def _response_headers(response: Response) -> Response:
-        """Headers every response gets, whatever produced it.
-
-        `no-store` because every body is scoped to one owner, and identity
-        becomes a cookie at M5 -- which a CDN does not key on. A single cached
-        200 would serve one user's tree to the next.
-
-        `nosniff` because responses are JSON and problem+JSON, and a browser
-        that guesses otherwise about a body containing user-chosen names is a
-        browser deciding to execute them.
-        """
-        response.headers.setdefault("Cache-Control", "no-store")
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        # Flask-Limiter adds Retry-After to every response once rate-limit
-        # headers are on, including successful ones, where it means nothing and
-        # a cautious client may well honour it.
-        if response.status_code != 429:
-            response.headers.pop("Retry-After", None)
-        return response
 
     return app
 
