@@ -187,8 +187,15 @@ def test_the_page_size_is_clamped(svc: TreeService, alice: int) -> None:
 
 
 @pytest.mark.invariant
-def test_the_first_page_sentinel_is_below_every_storable_name(session: Session) -> None:
-    """The sentinel `('', 0)` is sound because no stored name can be empty.
+def test_the_blank_name_constraint_still_exists(session: Session) -> None:
+    """The schema precondition the `('', 0)` sentinel rests on.
+
+    Renamed: this asserts a row in `pg_constraint`, not anything in `tree.py`.
+    Change `_FIRST_PAGE` to `("\xff", 0)` and it still passes. The paging
+    behaviour itself is covered by `test_paging_returns_every_row_exactly_once`;
+    what this guards is the assumption underneath it.
+
+    The sentinel is sound because no stored name can be empty.
 
     One statement serves the first page and every page after it only while that
     holds. If `ck_nodes_name_not_blank` were ever dropped, a row with an empty

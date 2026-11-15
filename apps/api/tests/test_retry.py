@@ -268,9 +268,18 @@ def test_statement_timeout_becomes_503_and_is_not_retried(
     b = make_node(alice, "b")
     session.commit()
 
-    # One millisecond: every statement the move issues will exceed it.
-    actor = new_session(statement_timeout_ms=1)
+    # Not a 1 ms timeout and a hope: a single-row indexed SELECT can finish
+    # inside a millisecond on a warm connection, which made the old version
+    # flaky by construction. A real slow statement at a real step instead.
+    actor = new_session(statement_timeout_ms=100)
     svc = TreeService(actor, MAX_DEPTH)
+    original = svc._repo.lock_move_participants
+
+    def slow_lock(*args: object, **kwargs: object) -> list[int]:
+        actor.execute(text("SELECT pg_sleep(0.5)"))  # exceeds the 100 ms budget
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    svc._repo.lock_move_participants = slow_lock  # type: ignore[method-assign]
 
     with pytest.raises(OperationTimedOut):
         svc.move(alice, b, a)
