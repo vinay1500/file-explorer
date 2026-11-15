@@ -120,6 +120,25 @@ jobs:
           ruff format --diff .
           mypy
 
+      - name: OpenAPI document is current
+        env:
+          DEV_ACTOR_ID: 1
+        run: |
+          python - <<'PY' > /tmp/openapi.json
+          import json
+          from file_explorer.app import create_app
+          with create_app().test_request_context():
+              from flask import current_app
+              spec = current_app.extensions["flask-smorest"]["apis"][""]["ext_obj"].spec
+              print(json.dumps(spec.to_dict(), indent=2, sort_keys=True))
+          PY
+          if ! diff -u docs/openapi.json /tmp/openapi.json; then
+            echo "::error::docs/openapi.json is stale. The document above is current;"
+            echo "::error::commit it so the API contract stays reviewable in the diff."
+            exit 1
+          fi
+          echo "OpenAPI document matches the committed copy"
+
       - name: Apply migrations
         run: flask db upgrade
 
