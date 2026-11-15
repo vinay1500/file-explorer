@@ -150,6 +150,83 @@ SELECT EXISTS (SELECT 1 FROM ancestry WHERE id = :candidate_id)
 Moving X under its own descendant means X is somewhere on the path from that descendant up to
 the root. That is precisely what this returns. One query, any depth, no loop.
 
+## Listing is the fourth shape, and it is not recursive
+
+`list_children` and `list_roots` are flat queries, which makes them look like the easy ones. They
+carry the subtlest failure in this chapter.
+
+Pagination is **keyset**, not `OFFSET`. `OFFSET 500` makes PostgreSQL walk and discard five
+hundred rows before returning anything, so deep pages get linearly slower; worse, a row inserted
+before the window shifts everything along and the next page silently skips one. The cursor is the
+sort key itself — `(name, id)` — so neither happens:
+
+```sql
+WHERE owner_id = :owner_id
+  AND parent_id = :parent_id
+  AND (name COLLATE "C", id) > (:after_name COLLATE "C", :after_id)
+ORDER BY name COLLATE "C", id
+LIMIT :limit
+```
+
+### The collation is load-bearing
+
+Keyset works only while the stored order and the comparison agree. A text index built under one
+collation and compared under another disagrees with itself — which is exactly what the glibc 2.28
+change did to indexes built before it.
+
+Here that lands twice, because `uq_nodes_parent_name` and `uq_nodes_root_name` enforce I4 and I2
+**and** carry the keyset ordering. A collation shift would let duplicates through and start
+skipping pages at the same time, and neither failure announces itself.
+
+Migration 0002 rebuilds both under `COLLATE "C"`: byte order, no locale, no library version to
+drift with. The cost is `Zebra` before `apple`, which is a display concern and belongs to the
+client. What pagination and uniqueness need is only that the order is *stable*.
+
+> Recreating a unique index under `"C"` cannot fail on existing data. The default collations are
+> deterministic, so they already treat two different byte strings as unequal; `"C"` makes no more
+> pairs equal than they were. It can only be more permissive, never less.
+
+### Why the test reads the catalogue instead of comparing sort orders
+
+The obvious test inserts names and asserts byte order. It would have proved nothing.
+
+**This suite's PostgreSQL is initialised with `--locale=C`**, so the database default already *is*
+byte order — an ordering test passes whether or not the collation was ever pinned. Production is
+not initialised that way, which is precisely where the bug would live.
+
+So the guard reads `pg_index`, which records the collation each index was actually built with and
+does not care what the default is:
+
+```python
+assert pinned[index] == "C", (
+    f"{index} is built under collation {pinned[index]!r}, not 'C'. "
+    "A glibc or ICU upgrade can then reorder it underneath the keyset "
+    "comparison, and pages start skipping rows silently."
+)
+```
+
+Confirmed by mutation: with the pin removed from the migration, the ordering test **still passed**
+and only the catalogue test failed. A second test builds an ICU collation and asserts the two
+orders genuinely *differ* on its data — a comparison that cannot tell its two sides apart is not a
+comparison.
+
+> The general lesson, and the third time this project has met it: **a test environment configured
+> for convenience can hide the exact class of bug you are testing for.** `--locale=C` makes the
+> suite deterministic, which is good, and makes one whole category of collation bug invisible,
+> which is not.
+
+### Two smaller things that are easy to get wrong
+
+**One row beyond the page is fetched.** A page being full is not evidence that another page
+exists. Without the lookahead, every list whose size divides evenly by the page size ends with a
+cursor pointing at an empty page.
+
+**The first-page sentinel is `('', 0)`**, and it is sound rather than lucky: `ck_nodes_name_not_blank`
+means no stored name can be empty, so the sentinel sorts strictly below every real `(name, id)`.
+That lets one statement serve the first page and every page after it, instead of two plans that
+can drift apart. A test asserts that constraint still exists, because the day it is dropped the
+first page starts skipping a row.
+
 ## The same shape, three times
 
 | Query | Direction | Used by |
