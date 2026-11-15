@@ -46,14 +46,14 @@ def svc(session: Session) -> TreeService:
         ("tab is trimmed but not inside", "doc\tument"),
         ("DEL", "doc\x7fument"),
         ("C1 control", "doc\x85ument"),
-        ("RTL override", "exe.t‮gpj.txt"),
-        ("LTR override", "doc‭ument"),
-        ("pop directional formatting", "doc‬ument"),
-        ("first strong isolate", "doc⁨ument"),
-        ("pop directional isolate", "doc⁩ument"),
-        ("zero width space", "doc​ument"),
-        ("word joiner", "doc⁠ument"),
-        ("byte order mark", "doc﻿ument"),
+        ("RTL override", "exe.t\u202egpj.txt"),
+        ("LTR override", "doc\u202dument"),
+        ("pop directional formatting", "doc\u202cument"),
+        ("first strong isolate", "doc\u2068ument"),
+        ("pop directional isolate", "doc\u2069ument"),
+        ("zero width space", "doc\u200bument"),
+        ("word joiner", "doc\u2060ument"),
+        ("byte order mark", "doc\ufeffument"),
     ],
 )
 def test_names_that_are_rejected(label: str, name: str) -> None:
@@ -73,10 +73,10 @@ def test_names_that_are_rejected(label: str, name: str) -> None:
     [
         ("empty", ""),
         ("ASCII space", " "),
-        ("non-breaking space", " "),
-        ("ideographic space", "　"),
-        ("ogham space mark", " "),
-        ("mixed whitespace", " \t \n "),
+        ("non-breaking space", "\u00a0"),
+        ("ideographic space", "\u3000"),
+        ("ogham space mark", "\u1680"),
+        ("mixed whitespace", " \t\u00a0\n "),
     ],
 )
 def test_names_that_are_nothing_once_trimmed(label: str, name: str) -> None:
@@ -125,10 +125,10 @@ def test_a_non_string_is_rejected_rather_than_coerced() -> None:
 @pytest.mark.parametrize(
     ("label", "name"),
     [
-        ("zero width non-joiner", "می‌خواهم"),
-        ("zero width joiner", "क्‍ष"),
-        ("left-to-right mark", "file‎.txt"),
-        ("right-to-left mark", "קובץ‏.txt"),
+        ("zero width non-joiner", "می\u200cخواهم"),
+        ("zero width joiner", "क्\u200dष"),
+        ("left-to-right mark", "file\u200e.txt"),
+        ("right-to-left mark", "קובץ\u200f.txt"),
         ("emoji", "holiday \U0001f334.jpg"),
         ("CJK", "年度報告.pdf"),
         ("inner spaces", "quarterly report 2026.pdf"),
@@ -181,11 +181,15 @@ def test_two_spellings_of_one_name_collide_instead_of_coexisting(
 def test_rename_normalises_too(svc: TreeService, alice: int) -> None:
     """Both write paths, or the second one reintroduces what the first prevents."""
     home = svc.create(alice, None, "home", "folder")
-    svc.create(alice, home, "café", "folder")
+    precomposed = "caf\u00e9"
+    decomposed = "cafe\u0301"
+    assert precomposed != decomposed, "the two spellings must differ or this proves nothing"
+
+    svc.create(alice, home, precomposed, "folder")
     other = svc.create(alice, home, "other", "folder")
 
     with pytest.raises(DuplicateName):
-        svc.rename(alice, other, "café")
+        svc.rename(alice, other, decomposed)
 
 
 @pytest.mark.invariant
