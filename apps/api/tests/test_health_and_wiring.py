@@ -294,8 +294,17 @@ def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not(wired: Fl
 
 
 @pytest.mark.invariant
-def test_health_stays_available_while_everything_else_is_limited(wired: Flask) -> None:
-    """The exemption, against the limit the application actually has.
+def test_health_is_exempt_from_the_limiter(wired: Flask) -> None:
+    """The exemption, driven against health's **own** bucket.
+
+    Flask-Limiter applies its default limits per endpoint, so each route has a
+    separate bucket per caller. The earlier version of this spent `/roots`'s
+    budget and then asked `/health` — which passes with or without the
+    exemption, because it was never the same bucket. Removing
+    `@limiter.exempt` survived it.
+
+    The limit is therefore **per endpoint per address**, not a global ceiling,
+    and the configuration comment now says so.
 
     A limiter that can silence the health check turns a busy minute into an
     outage: the one endpoint that reports whether the service is alive stops
@@ -306,14 +315,12 @@ def test_health_stays_available_while_everything_else_is_limited(wired: Flask) -
 
     limiter.reset()
     try:
-        for _ in range(limit + 5):
-            client.get("/api/v1/roots")
-        assert client.get("/api/v1/roots").status_code == 429, "the limiter is not on"
-
-        for _ in range(10):
-            assert client.get("/api/v1/health").status_code in {200, 503}, (
-                "health was rate limited, so a busy minute silences the one "
-                "endpoint that reports whether the service is alive"
-            )
+        statuses = {client.get("/api/v1/health").status_code for _ in range(limit + 10)}
     finally:
         limiter.reset()
+
+    assert 429 not in statuses, (
+        f"health was rate limited after {limit + 10} requests, so a busy minute "
+        "silences the one endpoint that reports whether the service is alive"
+    )
+    assert statuses <= {200, 503}, f"unexpected statuses from health: {statuses}"
