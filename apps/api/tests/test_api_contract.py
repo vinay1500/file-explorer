@@ -24,6 +24,7 @@ from sqlalchemy import text
 from file_explorer.app import create_app
 from file_explorer.config import Config
 
+
 @pytest.fixture
 def client(app: Flask, alice: int, session: object) -> Iterator[FlaskClient]:
     """A test client acting as alice.
