@@ -54,8 +54,9 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
 
     limiter.init_app(app)
 
+    # `ERROR_SCHEMA` registers the Problem component itself, so registering it
+    # again here raises DuplicateComponentNameError.
     api = ProblemApi(app)
-    api.spec.components.schema("Problem", schema=ProblemSchema)
 
     from file_explorer.blueprints.nodes import blp as nodes_blp
 
