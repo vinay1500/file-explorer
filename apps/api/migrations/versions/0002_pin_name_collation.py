@@ -18,6 +18,16 @@ That matters twice here.
   if the stored order and the comparison disagree, pages **skip rows** -- and
   they skip silently, because every individual page still looks plausible.
 
+A measurement, so the next reader does not have to assume either way. On
+17 Nov 2026 the deployed database reported `datcollate` and `datctype` of
+`C.UTF-8` under PostgreSQL's `builtin` provider -- which sorts by code point and
+carries no library version to drift, and for UTF-8 code point order *is* byte
+order. So on that cluster this migration agrees with the default rather than
+overriding it. The pinning is not wasted: it makes the indexes independent of
+the cluster they are restored into, which is the property actually wanted. But
+it is insurance, not a correction, and describing it as the only thing holding
+ordering together would overstate it.
+
 `"C"` is byte order: no locale, no library version, no drift. The cost is that
 uppercase sorts before lowercase, so `Zebra` comes before `apple`. That is a
 display concern and belongs to the client, which can order however it likes --

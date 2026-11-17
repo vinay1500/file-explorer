@@ -86,16 +86,44 @@ whether or not the indexes were ever pinned to a collation.
 That is why the collation guard reads `pg_index` instead of comparing sort
 orders. Confirmed by mutation — run 10 in [`docs/MUTATIONS.md`](../MUTATIONS.md).
 
-There is a sharper way to put it, which only became visible once the deployed
-database existed. A managed database has whatever cluster default the provider
-gives it, and no `POSTGRES_INITDB_ARGS` to override. So the configuration this
-suite has never run against is not some exotic edge case — **it is production.**
-Migration 0002's `COLLATE "C"` on the indexes is the only thing making ordering
-stable there, and the one place that pinning actually changes the answer is the
-one place nothing has ever tested it.
+### Measuring it, and being wrong about it
 
-A second service container with a real locale is the fix, and the honest note
-until it lands is that the pinning is argued for rather than demonstrated.
+Once the deployed database existed, the obvious next thought was that the
+configuration this suite has never run against *is production* — because a
+managed database has whatever cluster default the provider gives it and no
+`POSTGRES_INITDB_ARGS` to override. On that reading, migration 0002's
+`COLLATE "C"` was the only thing holding ordering together in the one place
+nothing had ever tested.
+
+Then it got measured instead of assumed. The deployed database reports:
+
+```
+datcollate           C.UTF-8
+datctype             C.UTF-8
+collation provider   b (builtin)
+```
+
+So the cluster default there **is** byte order, same as in CI. The provider is
+PostgreSQL 17's `builtin`, which sorts by code point and carries no library
+version to drift — and for UTF-8, code point order and byte order are the same
+order, so `C.UTF-8` and `COLLATE "C"` agree.
+
+That makes the pinning *agree* with the cluster default rather than override
+it. Which means the alarming version of the claim was wrong: production is not
+an untested configuration. What the pinning still buys is independence from a
+future change — a different provider, a restore into a locale-collated cluster,
+a provider changing its own default — and that is a smaller, duller benefit
+than the one it was briefly credited with.
+
+The hole that does remain is the one mutation 10 found, and it is a hole in the
+*suite*, not in production: with both databases C-collated, nothing can tell
+"ordering is byte order because the indexes are pinned" from "ordering is byte
+order because the default already was". A second container with a real locale
+would restore that distinction. Worth having, and no longer urgent.
+
+**The pattern worth keeping is not the collation. It is that a one-sentence
+query settled in forty seconds what two paragraphs of reasoning had got
+backwards.**
 
 ### Real PostgreSQL, never SQLite
 
