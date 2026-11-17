@@ -62,6 +62,7 @@ SEED: tuple[tuple[str, str, tuple], ...] = (
     ("Archive", "folder", ()),
 )
 
+
 def _count(nodes: tuple) -> int:
     """How many rows `SEED` produces. Computed, not written down.
 
