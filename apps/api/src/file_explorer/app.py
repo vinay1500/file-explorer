@@ -16,7 +16,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from file_explorer import auth as auth_module, problems
+from file_explorer import auth as auth_module
+from file_explorer import problems
 from file_explorer.config import Config, engine_options
 from file_explorer.extensions import db, limiter, migrate
 from file_explorer.problems import PROBLEM_CONTENT_TYPE

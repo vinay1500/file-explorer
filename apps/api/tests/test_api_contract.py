@@ -42,8 +42,12 @@ def test_the_document_declares_every_route(client: FlaskClient) -> None:
     assert spec["openapi"].startswith("3.")  # type: ignore[union-attr]
     paths = spec["paths"]
     assert isinstance(paths, dict)
-    assert len(paths) == 6, f"expected six routes, found {sorted(paths)}"
+    assert len(paths) == 10, f"expected ten routes, found {sorted(paths)}"
     for route in (
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/me",
         "/api/v1/roots",
         "/api/v1/nodes",
         "/api/v1/nodes/{node_id}",
@@ -73,9 +77,20 @@ def test_move_accepts_a_null_destination_in_the_document(client: FlaskClient) ->
     )
 
 
+#: Routes reachable without a session, so a documented 401 would be a lie.
+#: Named individually rather than matched by prefix: `/auth/logout` and
+#: `/auth/me` are under the same prefix and both require one.
+PUBLIC_OPERATIONS = frozenset({"POST /api/v1/auth/register", "POST /api/v1/auth/login"})
+
+
 @pytest.mark.invariant
 def test_every_route_documents_401(client: FlaskClient) -> None:
-    """Documented from day one, so M5 is not a breaking change for clients."""
+    """Documented from day one, so M5 was not a breaking change for clients.
+
+    It was not: the four node routes that existed before M5 documented 401
+    while `require_actor()` still returned a configured id, so a client
+    generated against the old document already handled being signed out.
+    """
     spec = _problem(client.get("/api/openapi.json"))
     verbs = {"get", "post", "put", "patch", "delete", "head", "options"}
     missing = [
@@ -86,6 +101,7 @@ def test_every_route_documents_401(client: FlaskClient) -> None:
         # whose value is a list rather than an operation object.
         if method in verbs
         and path.startswith("/api/v1/")
+        and f"{method.upper()} {path}" not in PUBLIC_OPERATIONS
         and "401" not in operation.get("responses", {})
     ]
     assert not missing, f"routes with no documented 401: {missing}"

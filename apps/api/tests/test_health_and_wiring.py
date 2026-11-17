@@ -141,7 +141,9 @@ def test_an_unexpected_error_inside_a_route_does_not_leak(
 
 
 @pytest.mark.invariant
-def test_a_forwarded_address_is_trusted_only_when_configured() -> None:
+def test_a_forwarded_address_is_trusted_only_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`TRUST_PROXY_HOPS` is the difference between two opposite failures.
 
     Zero and behind a balancer: every caller shares the balancer's address, so
@@ -158,6 +160,11 @@ def test_a_forwarded_address_is_trusted_only_when_configured() -> None:
         TRUST_PROXY_HOPS = 1
 
     seen: dict[str, str | None] = {}
+
+    # Public for the duration: `before_request` would 401 this ad-hoc route
+    # before the view could record anything, and what is under test is which
+    # address ProxyFix leaves behind, not who is allowed to ask.
+    monkeypatch.setattr(auth, "PUBLIC_ENDPOINTS", auth.PUBLIC_ENDPOINTS | {"_whoami"})
 
     def record(built: Flask) -> str | None:
         @built.get("/api/v1/whoami")
@@ -203,7 +210,9 @@ def test_the_error_response_component_is_retyped_or_says_why(
 
 
 @pytest.mark.invariant
-def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem() -> None:
+def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The `ValidationError` handler, which no HTTP request reaches.
 
     flask-smorest catches marshmallow inside `@blp.arguments` and re-raises it
@@ -214,6 +223,12 @@ def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem() -> None
     from marshmallow import ValidationError
 
     built = create_app(Config)
+
+    # Public for the duration. Authentication runs in `before_request` now, so
+    # an ad-hoc route on a fresh app is a 401 before the view raises anything
+    # -- which is the point of moving it there, and is why this test went red
+    # on a change that had nothing to do with validation.
+    monkeypatch.setattr(auth, "PUBLIC_ENDPOINTS", auth.PUBLIC_ENDPOINTS | {"_validate"})
 
     @built.get("/api/v1/validate")
     def _validate() -> str:
@@ -352,6 +367,10 @@ ALLOWED_RULES = frozenset(
         "/static/<path:filename>",
         "/api/openapi.json",
         "/api/v1/health",
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/me",
         "/api/v1/roots",
         "/api/v1/nodes",
         "/api/v1/nodes/<int:node_id>",
