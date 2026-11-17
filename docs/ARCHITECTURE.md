@@ -46,7 +46,7 @@ trash/restore, search, real-time collaboration.
 | Validation | none ✅ | **marshmallow 3** via flask-smorest | Also generates OpenAPI |
 | ORM | Flask-SQLAlchemy 3.1.1 / SQLAlchemy 2.0.40 ✅ | Same | |
 | Migrations | none — `db.create_all()` ✅ | **Alembic** via Flask-Migrate | |
-| Auth | none ✅ | **Flask-JWT-Extended** in cookie mode | Decision D-05 |
+| Auth | none ✅ | **Opaque session id** in an httpOnly cookie, rows in `sessions` | D-05, amended by **D-21**: not a JWT. ADR 0004 |
 | Password hashing | none ✅ | **argon2-cffi** | |
 | Rate limiting | none ✅ | **Flask-Limiter** | Auth endpoints only |
 | Logging | Flask default ✅ | **structlog**, JSON, request-id bound | |
@@ -235,8 +235,11 @@ implementation that reuses the rows its locking select returned.
 ## 6. API conventions
 
 - **Base path and version:** `/api/v1`. Breaking changes bump the version.
-- **Authentication:** JWT in an httpOnly, Secure, SameSite=Lax cookie, with a double-submit CSRF
-  token required on every mutating request. See `docs/adr/0004`.
+- **Authentication:** an opaque session id in an httpOnly, Secure, SameSite cookie, with a
+  synchronizer CSRF token bound to the session row. **Not a JWT and not double-submit** — both
+  were amended by D-21 before either was built; see ADR 0004 for why. The old wording survived
+  here for three days after the code stopped matching it, which is the failure this project has
+  a test for elsewhere and does not yet have one for in prose. See `docs/adr/0004`.
 - **Error format:** RFC 9457 Problem Details, the same shape for every failure:
 
 ```json
@@ -402,7 +405,7 @@ context and consequences.
 | 0001 | Adjacency list over nested sets, closure table or materialised path |
 | 0002 | Recursive CTE ancestry check for cycle prevention |
 | 0003 | Row-locked transaction with deterministic lock order for concurrent moves |
-| 0004 | JWT in an httpOnly cookie with CSRF, over localStorage |
+| 0004 | The session credential: an opaque id in an httpOnly cookie with a bound CSRF token, over localStorage. Amended by D-21 |
 | 0005 | Monorepo over two repositories |
 
 ---
