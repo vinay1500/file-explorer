@@ -19,13 +19,35 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as OrmSession
 
 from file_explorer import passwords
-from file_explorer.models.session import (
-    CSRF_BYTES,
-    TOKEN_BYTES,
-    new_csrf_token,
-    new_token,
-    token_digest,
-)
+from file_explorer.models import session as session_model
+
+
+# --- the schema is actually there ----------------------------------------
+
+
+@pytest.mark.invariant
+def test_the_migrations_are_committed_not_just_run(session: OrmSession) -> None:
+    """Running every migration and committing none of them looks identical in a log.
+
+    It happened. Raising the migration timeouts was written as two statements
+    before `context.configure`, which looks equivalent to running them inside
+    `context.begin_transaction()` and is not: in SQLAlchemy 2.x the first
+    `connection.execute()` implicitly begins a transaction, so alembic's context
+    manager no longer owned one, nothing committed, and closing the connection
+    rolled the whole upgrade back. Alembic logged "Running upgrade" for all
+    three migrations and the database was empty.
+
+    Two hundred tests then failed with `relation "users" does not exist`, which
+    names the symptom and not the cause. This names the cause.
+    """
+    for table in ("users", "nodes", "sessions"):
+        exists = session.execute(
+            text("SELECT to_regclass(:t) IS NOT NULL"), {"t": f"public.{table}"}
+        ).scalar_one()
+        assert exists, f"{table} does not exist: the migrations ran and were not committed"
+
+    version = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    assert version == "0003", f"alembic_version says {version!r}, so a migration did not stick"
 
 
 # --- the hash itself ------------------------------------------------------
@@ -107,8 +129,8 @@ def test_needs_rehash_does_not_decide_whether_a_hash_is_usable() -> None:
 @pytest.mark.invariant
 def test_the_cookie_value_is_never_what_is_stored() -> None:
     """A read of `sessions` must not yield anything a caller can present."""
-    token = new_token()
-    digest = token_digest(token)
+    token = session_model.new_token()
+    digest = session_model.token_digest(token)
 
     assert digest == hashlib.sha256(token.encode("utf-8")).digest()
     assert len(digest) == 32
@@ -118,14 +140,14 @@ def test_the_cookie_value_is_never_what_is_stored() -> None:
 
 @pytest.mark.invariant
 def test_two_tokens_are_never_the_same() -> None:
-    tokens = {new_token() for _ in range(200)}
-    csrf = {new_csrf_token() for _ in range(200)}
+    tokens = {session_model.new_token() for _ in range(200)}
+    csrf = {session_model.new_csrf_token() for _ in range(200)}
     assert len(tokens) == 200
     assert len(csrf) == 200
     # 32 bytes, urlsafe-base64: 43 characters with no padding.
     assert all(len(t) >= 43 for t in tokens)
-    assert TOKEN_BYTES == 32
-    assert CSRF_BYTES == 32
+    assert session_model.TOKEN_BYTES == 32
+    assert session_model.CSRF_BYTES == 32
 
 
 # --- what the database refuses --------------------------------------------
@@ -167,9 +189,9 @@ def test_a_session_cannot_outlive_the_user_it_names(
             "VALUES (:h, :u, :c, :e)"
         ),
         {
-            "h": token_digest(new_token()),
+            "h": session_model.token_digest(session_model.new_token()),
             "u": uid,
-            "c": new_csrf_token(),
+            "c": session_model.new_csrf_token(),
             "e": datetime.now(UTC) + timedelta(days=1),
         },
     )
@@ -197,9 +219,9 @@ def test_a_session_cannot_expire_before_it_begins(
                 "VALUES (:h, :u, :c, :e)"
             ),
             {
-                "h": token_digest(new_token()),
+                "h": session_model.token_digest(session_model.new_token()),
                 "u": uid,
-                "c": new_csrf_token(),
+                "c": session_model.new_csrf_token(),
                 "e": datetime.now(UTC) - timedelta(days=1),
             },
         )
@@ -219,7 +241,7 @@ def test_a_short_csrf_token_is_refused_by_the_database(
                 "VALUES (:h, :u, :c, :e)"
             ),
             {
-                "h": token_digest(new_token()),
+                "h": session_model.token_digest(session_model.new_token()),
                 "u": uid,
                 "c": "short",
                 "e": datetime.now(UTC) + timedelta(days=1),
