@@ -11,7 +11,7 @@ and [Chapter 7](07-the-silent-outage.md) is what happens when one is not.
 | Need | Choice | Cost | The limit that matters |
 |---|---|---|---|
 | Source & CI | GitHub public repo + Actions | $0 | Free and unmetered **on public repositories** |
-| Database (demo) | Neon free | $0 | 1 GB/project, 100 CU-hours/month, **no expiry, no card** |
+| Database (demo) | Neon free | $0 | 1 GB/project, 100 CU-hours/month, 10 branches, **no expiry, no card**, and a compute that suspends after 5 min idle — mandatory, not configurable |
 | Database (dev & test) | a container in CI | $0 | ephemeral per job; created and destroyed every run |
 | API hosting | Render free web service | $0 | spins down after 15 min idle, ~50 s wake, 750 instance-hours/month |
 | Web hosting | Vercel Hobby | $0 | non-commercial use only |
@@ -52,6 +52,38 @@ duplicated setup, it is a hard requirement.
 Two further reasons the suite does not run against the managed database: every query would cross
 a network, and the concurrency tests hold a transaction open on one connection while a second
 blocks on a row lock — behaviour that is not reliably what you are testing through a pooler.
+
+## The branch-per-pull-request offer, and why it is declined
+
+The provider has a GitHub integration, and it is a good one: connect the repository, and every
+pull request gets its own database branch, copy-on-write and seconds old, deleted again when the
+pull request closes. For a team shipping preview environments that is worth having.
+
+It is declined here, for three reasons that are worth being able to say out loud.
+
+**It stores an account-scoped API key in a public repository.** The integration's setup creates
+a `NEON_API_KEY` secret and a `NEON_PROJECT_ID` variable. That key is not scoped to one project
+or to reading — it can enumerate projects, fetch a connection URI with the password in it, and
+delete branches. Repository secrets are not exposed to pull requests from forks, so the
+practical exposure is small; the *blast radius* is the whole account. That is a poor trade for a
+convenience, in a repository whose entire purpose is to be read by strangers.
+
+**There is already a database in forty-five seconds.** The service container is free, unmetered,
+isolated per job, and wiped afterwards. A provider branch bills compute against a 100 CU-hour
+monthly allowance, caps at ten branches per project, and adds a network and an external
+dependency to a job that currently has neither.
+
+**And the thing it connects does not exist.** The payoff of a per-pull-request database is a
+per-pull-request *deployment* pointed at it. There are none here and there will not be: the free
+web tier is a single instance.
+
+> An integration's value is the thing at the far end of it. Where that end does not exist, what
+> remains is only its attack surface.
+
+What is taken instead is the narrowest version that does the job: **one repository secret**
+holding the connection string, and one `workflow_dispatch`-only workflow that uses it to ask the
+database read-only questions about itself. That is the whole of the link between the two
+accounts.
 
 ## The keep-warm idea, and why it was dropped
 
