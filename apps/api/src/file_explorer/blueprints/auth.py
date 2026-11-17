@@ -41,7 +41,12 @@ from file_explorer.extensions import db, limiter
 from file_explorer.models.user import User
 from file_explorer.names import normalise_email
 from file_explorer.problems import PROBLEM_CONTENT_TYPE
-from file_explorer.schemas.auth import CredentialsSchema, SessionSchema, WhoAmISchema
+from file_explorer.schemas.auth import (
+    CredentialsSchema,
+    RegistrationAcceptedSchema,
+    SessionSchema,
+    WhoAmISchema,
+)
 from file_explorer.schemas.node import ProblemSchema
 from file_explorer.services.sessions import SessionService
 
@@ -75,7 +80,7 @@ class Register(MethodView):
     decorators: ClassVar[list[Any]] = [limiter.limit(AUTH_RATE_LIMIT)]
 
     @blp.arguments(CredentialsSchema)
-    @blp.response(202, WhoAmISchema(only=("registered",)))
+    @blp.response(202, RegistrationAcceptedSchema)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(429, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     def post(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -95,7 +100,7 @@ class Register(MethodView):
             db.session.add(User(email=email, password_hash=encoded))
             db.session.commit()
 
-        return {"registered": True}
+        return {"accepted": True}
 
 
 @blp.route("/login")
@@ -103,6 +108,10 @@ class Login(MethodView):
     decorators: ClassVar[list[Any]] = [limiter.limit(AUTH_RATE_LIMIT)]
 
     @blp.arguments(CredentialsSchema)
+    # Documentation only. The view returns a `Response` so it can attach the
+    # cookie, and `@blp.response` would try to serialise that; `alt_response`
+    # describes the success shape without touching the return value.
+    @blp.alt_response(200, schema=SessionSchema)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(422, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
     @blp.alt_response(429, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
@@ -169,5 +178,4 @@ class Me(MethodView):
             "id": actor,
             "email": user.email if user is not None else "",
             "csrf_token": auth.current_csrf_token(),
-            "registered": True,
         }

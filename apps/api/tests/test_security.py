@@ -125,7 +125,7 @@ def test_registering_a_taken_address_says_nothing(
     )
 
     assert fresh.status_code == taken.status_code == 202
-    assert fresh.get_json() == taken.get_json()
+    assert fresh.get_json() == taken.get_json() == {"accepted": True}
 
 
 @pytest.mark.invariant

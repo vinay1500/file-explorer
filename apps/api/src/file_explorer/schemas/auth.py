@@ -52,12 +52,26 @@ class SessionSchema(Schema):
 
 
 class WhoAmISchema(Schema):
-    """What `/auth/me` returns, and the `registered` flag `/auth/register` uses."""
+    """What `/auth/me` returns."""
 
     class Meta:
         unknown = EXCLUDE
 
-    id = fields.Integer()
-    email = fields.String()
-    csrf_token = fields.String()
-    registered = fields.Boolean()
+    id = fields.Integer(required=True)
+    email = fields.String(required=True)
+    csrf_token = fields.String(required=True)
+
+
+class RegistrationAcceptedSchema(Schema):
+    """What `/auth/register` returns, whether or not anything was created.
+
+    Its own schema rather than `WhoAmISchema(only=("registered",))`: a schema
+    reused with `only` generates a *second* component in the OpenAPI document,
+    named `WhoAmI1`, and a published contract with a numbered duplicate in it
+    is the kind of detail a reviewer notices before anything else.
+    """
+
+    class Meta:
+        unknown = EXCLUDE
+
+    accepted = fields.Boolean(required=True)
