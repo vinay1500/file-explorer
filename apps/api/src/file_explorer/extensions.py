@@ -32,6 +32,7 @@ class Base(DeclarativeBase):
 db = SQLAlchemy(model_class=Base)
 migrate = Migrate()
 
+
 def rate_limit_key() -> str:
     """Who this request counts against.
 

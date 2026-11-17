@@ -190,6 +190,25 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
 
     _assert_the_cookie_can_reach_us(app)
 
+    # **Before `limiter.init_app`, and that is load-bearing.** Flask runs
+    # `before_request` functions in registration order, and Flask-Limiter adds
+    # its own during `init_app` -- so a hook registered afterwards runs *after*
+    # the limiter has already asked `rate_limit_key()` who the caller is. The
+    # key was then the address for every request, including authenticated ones,
+    # and the fix for keying on the session silently did nothing.
+    #
+    # This is the same trap as the `Retry-After` strip twenty lines up, in the
+    # opposite direction: that one needed to be registered *first* so it would
+    # run *last*, because `after_request` runs in reverse. Both were found by a
+    # test that drove the real behaviour rather than by reading the code.
+    #
+    # The cost of authenticating before rate limiting is one indexed
+    # primary-key read ahead of a limit that might refuse the request. Bounded,
+    # and it is not paid by a flood: with no cookie `resolve` returns before it
+    # queries anything, so an unauthenticated burst does no database work at
+    # all.
+    auth_module.register(app)
+
     limiter.init_app(app)
 
     # `ERROR_SCHEMA` registers the Problem component itself, so registering it
@@ -202,11 +221,11 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     api.register_blueprint(auth_blp)
     api.register_blueprint(nodes_blp)
 
-    # **After the blueprints.** `before_request` functions run in registration
-    # order, and this one resolves the session every route depends on, so it
-    # would be equally correct earlier -- but registering it here keeps the
-    # reading order honest: routes exist, then the thing that guards them.
-    auth_module.register(app)
+    # (`auth_module.register` is above, before `limiter.init_app`. The comment
+    # that used to be here said the position was a matter of reading order. It
+    # is not: the limiter asks who the caller is in its own `before_request`,
+    # so this one has to be registered first or the answer is always the
+    # address.)
 
     # After the blueprint: smorest registers its shared error response while
     # wiring routes, so doing this at Api() time finds nothing.

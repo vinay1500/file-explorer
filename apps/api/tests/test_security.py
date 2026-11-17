@@ -529,7 +529,15 @@ def test_the_limit_counts_the_session_not_the_address(
     a caller who wants more than their share sets a different value.
 
     Every test client here comes from the same address, so if the key were the
-    address this could not pass.
+    address this could not pass -- and it did not, the first time. Flask-Limiter
+    registers its own `before_request` during `init_app`, and `authenticate` was
+    registered after it, so the limiter asked who the caller was before anything
+    had decided. The key was the address for every request and the change to
+    key on the session did nothing at all.
+
+    Same trap as the `Retry-After` strip, in the opposite direction: that one
+    had to be registered first so it would run last, because `after_request`
+    runs in reverse. Both were caught by a test that drove the real behaviour.
     """
     from file_explorer.extensions import limiter
 
