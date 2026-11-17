@@ -607,3 +607,200 @@ def test_two_registrations_of_one_address_race_to_the_same_answer(
         text("SELECT count(*) FROM users WHERE email = 'race@example.com'")
     ).scalar_one()
     assert count == 1
+
+
+# --- isolation, by mechanism rather than by list --------------------------
+
+
+@pytest.mark.invariant
+def test_every_route_taking_a_node_id_refuses_another_owners_node(
+    client: FlaskClient, session: OrmSession, bob: int, make_node: Callable[..., int]
+) -> None:
+    """Driven off the URL map, so a route added next month is covered by default.
+
+    `test_no_route_reaches_another_owners_node` asserts the same property
+    against a hand-written list of six calls. A list is a thing somebody
+    forgets to extend -- M5 added four routes, and a list would have gone on
+    passing while covering six of ten.
+
+    This walks `app.url_map`, takes every rule with a `node_id` converter, and
+    drives each of its methods against a node that belongs to bob. The answer
+    must be **404 every time**: never 403, which confirms the row exists and
+    makes sequential ids enumerable, and never 2xx.
+
+    The bodies are deliberately valid. An invalid body would be refused at
+    validation and the test would pass without ever reaching the ownership
+    check, which is the vacuous shape M4 found five of.
+    """
+    theirs = make_node(bob, "bob-private")
+    make_node(bob, "bob-child", parent_id=theirs)
+    session.commit()
+
+    bodies: dict[str, dict[str, object]] = {
+        "PATCH": {"name": "mine-now"},
+        "POST": {"new_parent_id": None},
+    }
+
+    checked: list[str] = []
+    wrong: dict[str, int] = {}
+    for rule in client.application.url_map.iter_rules():
+        if "node_id" not in rule.arguments:
+            continue
+        path = rule.rule.replace("<int:node_id>", str(theirs))
+        for method in sorted(rule.methods or set()):
+            if method in {"HEAD", "OPTIONS"}:
+                continue
+            label = f"{method} {rule.rule}"
+            checked.append(label)
+            response = client.open(path, method=method, json=bodies.get(method))
+            if response.status_code != 404:
+                wrong[label] = response.status_code
+
+    assert len(checked) >= 5, f"the URL map walk found almost nothing: {checked}"
+    assert not wrong, f"these did not answer 404 for another owner's node: {wrong}"
+
+
+@pytest.mark.invariant
+def test_creating_under_another_owners_parent_is_404(
+    client: FlaskClient, session: OrmSession, bob: int, make_node: Callable[..., int]
+) -> None:
+    """The one cross-owner path that carries no node id in the URL.
+
+    `POST /nodes` takes the parent in the body, so the URL-map walk above
+    cannot see it. Named separately rather than folded in, because a route
+    whose ownership check lives in the body is exactly the kind a sweep
+    misses -- and the sweep would have gone on passing without it.
+
+    Note what the right answer is: **404 on the parent**, not 403 and not 422.
+    The caller is told the parent does not exist, because as far as they are
+    concerned it does not.
+    """
+    theirs = make_node(bob, "bob-private")
+    session.commit()
+
+    response = client.post(
+        "/api/v1/nodes", json={"name": "smuggled", "type": "folder", "parent_id": theirs}
+    )
+    assert response.status_code == 404
+
+    left = session.execute(text("SELECT count(*) FROM nodes WHERE name = 'smuggled'")).scalar_one()
+    assert left == 0, "the node was created anyway, under someone else's parent"
+
+
+@pytest.mark.invariant
+def test_every_repository_query_filters_by_owner() -> None:
+    """The answer to "what proves a query someone adds next month is scoped".
+
+    The route tests prove the routes that exist refuse. They can prove nothing
+    about a query that has not been written, and Gate 1's credibility review
+    named that gap exactly: *nothing makes a query scoped; the IDOR sweep is a
+    hand-written list*.
+
+    This reads `node_repo.py` and checks every statement handed to `text(...)`
+    -- the module-level constants **and the ones written inline inside a
+    method**. A new query with no owner predicate fails here before it can
+    reach a route.
+
+    ## Two things this got wrong before it got them right
+
+    The first version asked only "does the SQL mention `owner_id`". That is
+    vacuous against the mistake that matters: a recursive CTE needs the
+    predicate in the anchor term *and* the recursive term, and dropping the
+    recursive one leaves `owner_id` in the string three more times. So the
+    counts are recorded.
+
+    The second version walked only module-level assignments, and **seven of
+    the twenty-two owner predicates in the file live inside methods**, so a
+    third of the repository was outside a test claiming to cover all of it.
+    Found by removing each predicate line in turn and checking which removals
+    the test noticed. That exercise is the only reason either defect is known,
+    and it is cheap enough to repeat whenever this file changes.
+
+    Brittle in the safe direction: a legitimate rewrite has to come here and
+    say what it changed, which is the review.
+    """
+    import ast
+    from pathlib import Path
+
+    module = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "file_explorer"
+        / "repositories"
+        / "node_repo.py"
+    )
+    assert module.is_file(), f"{module} is not where this test expects it"
+
+    def sql_in(node: ast.AST) -> list[str]:
+        """Every string handed to `text(...)` anywhere inside `node`."""
+        found: list[str] = []
+        for inner in ast.walk(node):
+            if not isinstance(inner, ast.Call) or not inner.args:
+                continue
+            name = getattr(inner.func, "id", None) or getattr(inner.func, "attr", None)
+            if name != "text":
+                continue
+            arg = inner.args[0]
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                found.append(arg.value)
+            elif isinstance(arg, ast.JoinedStr):
+                # An f-string: only the literal parts are visible, which is
+                # enough, because a predicate is never interpolated here.
+                found.append("".join(v.value for v in arg.values if isinstance(v, ast.Constant)))
+        return found
+
+    tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
+
+    counted: dict[str, int] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    for sql in sql_in(node):
+                        counted[target.id] = sql.count("owner_id")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            statements = sql_in(node)
+            if statements:
+                counted[f"{node.name}()"] = sum(sql.count("owner_id") for sql in statements)
+
+    # Every owner predicate in the file, by where it lives. Four of the counts
+    # are 4 or 6 rather than 2 because a recursive CTE scopes both terms.
+    EXPECTED = {
+        "_ANCESTRY": 4,
+        "_SUBTREE_HEIGHT": 4,
+        "_LOCK_CHAIN": 6,
+        "_LOCK_ANCESTRY": 6,
+        "_SUBTREE_SIZE": 4,
+        "_LOCK_ONE": 2,
+        "_LIST_CHILDREN": 2,
+        "_LIST_ROOTS": 2,
+        "get()": 2,
+        "is_ancestor_of()": 4,
+        "insert_node()": 2,
+        "set_name()": 2,
+        "delete_node()": 2,
+        "count_for_owner()": 2,
+        "set_parent()": 2,
+    }
+
+    assert set(counted) == set(EXPECTED), (
+        "a query was added, renamed or moved and this table was not updated: "
+        f"{sorted(set(counted) ^ set(EXPECTED))}"
+    )
+
+    unscoped = sorted(name for name, n in counted.items() if n == 0)
+    assert not unscoped, (
+        f"these carry no owner predicate at all: {unscoped}. Every read and every write in this "
+        "repository is scoped to one owner, and one that is not cannot be reached safely from a "
+        "route"
+    )
+
+    thinned = {
+        name: (counted[name], want) for name, want in EXPECTED.items() if counted[name] < want
+    }
+    assert not thinned, (
+        f"these lost an owner predicate (found, expected): {thinned}. In a recursive CTE the "
+        "recursive term needs its own -- without it the walk leaves the owner's subtree and the "
+        "anchor's predicate does not stop it"
+    )
