@@ -50,6 +50,7 @@ from file_explorer.schemas.auth import (
     WhoAmISchema,
 )
 from file_explorer.schemas.node import ProblemSchema
+from file_explorer.services import guests
 from file_explorer.services.sessions import SessionService
 
 blp = Blueprint(
@@ -87,6 +88,10 @@ _DUMMY_HASH = passwords.hash_password("dummy password, never a real credential")
 # instance, not to be the only thing standing between an attacker and an
 # account. The password length floor does that.
 AUTH_RATE_LIMIT = "10 per minute"
+
+# Each guest costs an argon2 hash and nine inserts, and a demo link is the one
+# URL a crawler finds. Tighter than the credential limit for both reasons.
+GUEST_RATE_LIMIT = "5 per minute"
 
 
 def _cookie_settings() -> dict[str, Any]:
@@ -178,6 +183,43 @@ class Login(MethodView):
         response = make_response(jsonify(payload), 200)
         # The cookie's lifetime is the row's lifetime, computed from the same
         # expiry rather than from a second constant that could drift from it.
+        max_age = max(1, int((issued.expires_at - datetime.now(UTC)).total_seconds()))
+        auth.set_session_cookie(response, issued.token, max_age=max_age, **_cookie_settings())
+        return response
+
+
+@blp.route("/guest")
+class Guest(MethodView):
+    # Tighter than the credential limit, because each call costs an argon2 hash
+    # and nine inserts, and because a demo link is the one URL a crawler will
+    # find. Still keyed on the address -- there is no session on the way to
+    # getting one, which is the same trade as register and login.
+    decorators: ClassVar[list[Any]] = [limiter.limit(GUEST_RATE_LIMIT)]
+
+    @blp.response(200, SessionSchema)
+    @blp.alt_response(429, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
+    def post(self) -> Response:
+        """Open a demo session with a seeded tree. No form, no email, one click.
+
+        D-24. An interviewer with thirty seconds will not register, and a demo
+        nobody can open is not a demo.
+
+        **A guest is exactly a user.** Same table, same foreign keys, same
+        `owner_id` predicate on every query -- so nothing here weakens the
+        isolation M5 was spent establishing, and two guests in two browsers
+        demonstrate it rather than claiming it. Chosen over a shared demo
+        account, where the first visitor to delete everything ruins it for the
+        next, and over read-only unauthenticated access, which would need an
+        exception to the rule that every route requires a session.
+        """
+        user_id = guests.create_guest(db.session)
+        issued = SessionService(db.session).begin(user_id, guests.GUEST_SESSION_LIFETIME)
+        db.session.commit()
+
+        payload = SessionSchema().dump(
+            {"csrf_token": issued.csrf_token, "expires_at": issued.expires_at}
+        )
+        response = make_response(jsonify(payload), 200)
         max_age = max(1, int((issued.expires_at - datetime.now(UTC)).total_seconds()))
         auth.set_session_cookie(response, issued.token, max_age=max_age, **_cookie_settings())
         return response

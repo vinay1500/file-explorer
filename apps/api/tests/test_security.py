@@ -1007,3 +1007,122 @@ def test_registration_does_not_report_success_for_a_constraint_violation(
         "a check-constraint violation was reported as 202, so the caller believes an account "
         "exists that does not"
     )
+
+
+# --- the demo's front door ------------------------------------------------
+
+
+@pytest.mark.invariant
+def test_a_guest_session_arrives_with_a_tree(anon: FlaskClient, session: OrmSession) -> None:
+    """D-24. One click, no form, and something to look at.
+
+    An interviewer with thirty seconds will not register, and a demo nobody can
+    open is not a demo.
+    """
+    response = anon.post("/api/v1/auth/guest")
+    assert response.status_code == 200, response.get_data(as_text=True)
+
+    body = response.get_json()
+    assert body["csrf_token"]
+    cookie = response.headers["Set-Cookie"]
+    assert "HttpOnly" in cookie
+    assert "Max-Age=" in cookie
+
+    roots = anon.get("/api/v1/roots").get_json()
+    assert [n["name"] for n in roots["items"]] == ["Archive", "Contracts", "Documents", "Photos"]
+
+    from file_explorer.services import guests
+
+    total = session.execute(text("SELECT count(*) FROM nodes")).scalar_one()
+    assert total == guests.SEED_NODE_COUNT, f"the seed produced {total} nodes"
+    assert guests.SEED_NODE_COUNT >= 8, "the seed is too small to be worth showing"
+
+    # Three levels, so the breadcrumb endpoint has something to say. A two-level
+    # seed makes `/nodes/{id}/path` return one entry, which demonstrates
+    # nothing.
+    photos = next(n for n in roots["items"] if n["name"] == "Photos")
+    holiday = anon.get(f"/api/v1/nodes/{photos['id']}/children").get_json()["items"][0]
+    deepest = anon.get(f"/api/v1/nodes/{holiday['id']}/children").get_json()["items"][0]
+    crumbs = anon.get(f"/api/v1/nodes/{deepest['id']}/path").get_json()
+    assert [c["name"] for c in crumbs["path"]] == ["Photos", "Holiday", deepest["name"]]
+
+
+@pytest.mark.invariant
+def test_a_guest_is_exactly_a_user_and_cannot_see_another_guest(
+    app: Flask, session: OrmSession
+) -> None:
+    """The property that made this design the right one.
+
+    A shared demo account would have one tree that every visitor can ruin.
+    Read-only unauthenticated access would need an exception to the rule that
+    every route requires a session. A guest is a row in `users`, so every
+    owner-scoping guarantee applies unchanged -- and two guests in two browsers
+    *demonstrate* the isolation instead of claiming it.
+    """
+    first, second = app.test_client(), app.test_client()
+    first.post("/api/v1/auth/guest")
+    second.post("/api/v1/auth/guest")
+
+    mine = first.get("/api/v1/roots").get_json()["items"]
+    theirs = second.get("/api/v1/roots").get_json()["items"]
+    assert [n["id"] for n in mine] != [n["id"] for n in theirs], "two guests share a tree"
+
+    # And neither can reach the other's rows.
+    assert first.get(f"/api/v1/nodes/{theirs[0]['id']}/path").status_code == 404
+    assert second.get(f"/api/v1/nodes/{mine[0]['id']}/path").status_code == 404
+
+    guests_made = session.execute(text("SELECT count(*) FROM users WHERE is_guest")).scalar_one()
+    assert guests_made == 2
+
+
+@pytest.mark.invariant
+def test_a_guest_account_cannot_be_signed_into_by_password(
+    anon: FlaskClient, session: OrmSession
+) -> None:
+    """The only way into a guest account is the session it was handed.
+
+    Its stored hash is a real argon2id hash of a random string that is never
+    stored or returned, so it satisfies the schema's constraint and matches
+    nothing. Worth a test because the obvious shortcut -- a fixed placeholder
+    hash shared by every guest -- would be a single credential that opened all
+    of them.
+    """
+    anon.post("/api/v1/auth/guest")
+    email = session.execute(
+        text("SELECT email FROM users WHERE is_guest ORDER BY id DESC LIMIT 1")
+    ).scalar_one()
+    assert email.endswith("@guests.invalid")
+
+    for attempt in ("", "guest", "password", email):
+        fresh = anon.post("/api/v1/auth/login", json={"email": email, "password": attempt * 4})
+        assert fresh.status_code in (401, 422), f"{attempt!r} got {fresh.status_code}"
+
+
+@pytest.mark.invariant
+def test_abandoned_guests_are_collectable(session: OrmSession) -> None:
+    """What stops guest accounts accumulating is a function, not an intention.
+
+    One statement, and the cascades do the rest: `nodes.owner_id` and
+    `sessions.user_id` both cascade, so a guest's tree and any session still
+    pointing at it go with the row.
+    """
+    from file_explorer.services import guests
+
+    fresh = guests.create_guest(session)
+    session.commit()
+    seeded = session.execute(text("SELECT count(*) FROM nodes")).scalar_one()
+    assert seeded == guests.SEED_NODE_COUNT
+
+    assert guests.purge_guests(session) == 0, "a guest created now was collected"
+
+    later = datetime.now(UTC) + guests.GUEST_RETENTION + timedelta(minutes=1)
+    assert guests.purge_guests(session, now=later) == 1
+    session.commit()
+
+    left = session.execute(
+        text("SELECT count(*) FROM users WHERE id = :i"), {"i": fresh}
+    ).scalar_one()
+    assert left == 0
+    assert session.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 0, (
+        "deleting the guest left its tree behind"
+    )

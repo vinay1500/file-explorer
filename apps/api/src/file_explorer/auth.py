@@ -95,6 +95,9 @@ PUBLIC_RULES = frozenset(
         # `logout` and `me` are under the same prefix and both require one.
         "/api/v1/auth/register",
         "/api/v1/auth/login",
+        # The demo's front door. Public by definition: it exists to hand out a
+        # session to somebody who has none.
+        "/api/v1/auth/guest",
         # flask-smorest serves the generated document here.
         "/api/openapi.json",
         "/static/<path:filename>",

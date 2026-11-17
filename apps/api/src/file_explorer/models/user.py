@@ -10,7 +10,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, String, func, text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Index,
+    String,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from file_explorer.extensions import Base
@@ -43,6 +52,16 @@ class User(Base):
     # and, because the empty-hash branch returns before any Argon2 work, in the
     # timing channel as well.
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    # A demo account, created by one click and collected again later.
+    #
+    # A column rather than a convention on the address, because the sweeper has
+    # to be able to delete these and nothing else, and "the email ends in
+    # .invalid" is a rule somebody would eventually relax. A guest is otherwise
+    # **exactly a user**: every owner-scoping guarantee applies to it unchanged,
+    # which is the property that lets two guests in two browsers demonstrate
+    # isolation rather than merely claim it.
+    is_guest: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -79,6 +98,9 @@ class User(Base):
         CheckConstraint("password_hash LIKE '$argon2id$%'", name="password_hash_is_argon2id"),
         CheckConstraint(r"email = btrim(email, E' \t\n\r\f\v')", name="email_trimmed"),
         CheckConstraint("email <> ''", name="email_not_blank"),
+        # Partial: guests are the minority and the only query that reads this
+        # asks for them specifically.
+        Index("ix_users_is_guest", "created_at", postgresql_where=text("is_guest")),
     )
 
     def __repr__(self) -> str:
