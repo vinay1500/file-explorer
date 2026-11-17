@@ -11,6 +11,7 @@ from logging.config import fileConfig
 
 from alembic import context
 from flask import current_app
+from sqlalchemy import text
 
 config = context.config
 if config.config_file_name is not None:
@@ -46,6 +47,22 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = get_engine()
     with connectable.connect() as connection:
+        # A migration is not a request and must not inherit a request's budget.
+        #
+        # `engine_options()` sets `statement_timeout=5s` and `lock_timeout=3s`
+        # as connection startup options, because a runaway recursive query on
+        # cyclic data would otherwise hold a connection until the process died.
+        # Those are the right numbers for a tree query and the wrong ones for
+        # DDL: validating a check constraint over a populated table, or
+        # rebuilding an index, takes as long as the table is large, and a
+        # failure halfway is a half-applied migration.
+        #
+        # Raised here rather than in each migration so a new migration cannot
+        # forget. `SET LOCAL` scopes it to the migration transaction, so nothing
+        # else on the connection inherits it.
+        connection.execute(text("SET LOCAL statement_timeout = '600s'"))
+        connection.execute(text("SET LOCAL lock_timeout = '10s'"))
+
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
