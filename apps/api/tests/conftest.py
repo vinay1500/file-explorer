@@ -31,7 +31,6 @@ from flask.testing import FlaskClient
 from flask_migrate import upgrade
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
-
 from werkzeug.datastructures import Headers
 
 from file_explorer.app import create_app

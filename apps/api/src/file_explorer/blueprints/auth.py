@@ -29,7 +29,7 @@ not "timing cannot leak".
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from flask import Response, current_app, jsonify, make_response, request
 from flask.views import MethodView
@@ -72,7 +72,7 @@ def _cookie_settings() -> dict[str, Any]:
 
 @blp.route("/register")
 class Register(MethodView):
-    decorators = [limiter.limit(AUTH_RATE_LIMIT)]
+    decorators: ClassVar[list[Any]] = [limiter.limit(AUTH_RATE_LIMIT)]
 
     @blp.arguments(CredentialsSchema)
     @blp.response(202, WhoAmISchema(only=("registered",)))
@@ -100,7 +100,7 @@ class Register(MethodView):
 
 @blp.route("/login")
 class Login(MethodView):
-    decorators = [limiter.limit(AUTH_RATE_LIMIT)]
+    decorators: ClassVar[list[Any]] = [limiter.limit(AUTH_RATE_LIMIT)]
 
     @blp.arguments(CredentialsSchema)
     @blp.alt_response(401, schema=ProblemSchema, content_type=PROBLEM_CONTENT_TYPE)
