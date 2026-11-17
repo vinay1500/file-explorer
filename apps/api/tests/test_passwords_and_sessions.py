@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session as OrmSession
 from file_explorer import passwords
 from file_explorer.models import session as session_model
 
-
 # --- the schema is actually there ----------------------------------------
 
 
