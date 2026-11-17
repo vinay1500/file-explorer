@@ -804,3 +804,48 @@ def test_every_repository_query_filters_by_owner() -> None:
         "recursive term needs its own -- without it the walk leaves the owner's subtree and the "
         "anchor's predicate does not stop it"
     )
+
+
+@pytest.mark.invariant
+def test_the_losing_registration_is_202_not_500(
+    anon: FlaskClient,
+    registered: Callable[..., int],
+    session: OrmSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other side of the race: both callers pass the existence check.
+
+    `test_two_registrations_of_one_address_race_to_the_same_answer` takes the
+    path where the second request *finds* the row, which is what happens when
+    the two are far enough apart. This takes the path where they are not: both
+    probe, both see nothing, both insert, and the unique index decides.
+
+    Simulated by making the probe look at an id that cannot exist, which
+    produces exactly the interleaving without needing two connections and a
+    way to suspend one mid-request. The point is what the loser gets back:
+    **202, the same as the winner**. An unhandled violation here is a 500, and
+    a 500 on registration is an oracle -- it means somebody else has this
+    address.
+    """
+    from sqlalchemy import select as real_select
+
+    from file_explorer.models.user import User
+
+    registered("contested@example.com")
+    session.commit()
+
+    monkeypatch.setattr(
+        "file_explorer.blueprints.auth.select",
+        lambda *_args, **_kwargs: real_select(User.id).where(User.id == -1),
+    )
+
+    response = anon.post(
+        "/api/v1/auth/register", json={"email": "contested@example.com", "password": PASSWORD}
+    )
+    assert response.status_code == 202, response.get_data(as_text=True)
+    assert response.get_json() == {"accepted": True}
+
+    count = session.execute(
+        text("SELECT count(*) FROM users WHERE email = 'contested@example.com'")
+    ).scalar_one()
+    assert count == 1, "the race created a second account"
