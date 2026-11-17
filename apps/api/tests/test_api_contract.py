@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 import pytest
 from flask import Flask, request
@@ -24,22 +24,6 @@ from sqlalchemy import text
 
 from file_explorer.app import create_app
 from file_explorer.config import Config
-
-
-@pytest.fixture
-def client(app: Flask, alice: int, session: object) -> Iterator[FlaskClient]:
-    """A test client acting as alice.
-
-    `DEV_ACTOR_ID` is set here rather than in the environment so the default --
-    unset, and therefore 401 -- stays the default everywhere else.
-    """
-    previous = app.config.get("DEV_ACTOR_ID")
-    app.config["DEV_ACTOR_ID"] = alice
-    try:
-        with app.test_client() as test_client:
-            yield test_client
-    finally:
-        app.config["DEV_ACTOR_ID"] = previous
 
 
 def _problem(response: object) -> dict[str, object]:

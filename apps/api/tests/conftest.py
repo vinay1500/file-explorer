@@ -27,14 +27,22 @@ from collections.abc import Callable, Iterator
 
 import pytest
 from flask import Flask
+from flask.testing import FlaskClient
 from flask_migrate import upgrade
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from file_explorer.app import create_app
-from file_explorer.extensions import db
+from werkzeug.datastructures import Headers
 
-TABLES = ("nodes", "users")
+from file_explorer.app import create_app
+from file_explorer.auth import CSRF_HEADER, SESSION_COOKIE
+from file_explorer.extensions import db
+from file_explorer.services.sessions import SessionService
+
+# `sessions` cascades from `users`, so truncating users alone would clear it --
+# but listing it keeps the statement honest about what it empties, and a future
+# table that does not cascade would otherwise be missed here silently.
+TABLES = ("sessions", "nodes", "users")
 
 
 def _require_throwaway_url() -> str:
@@ -117,6 +125,81 @@ def new_session() -> Iterator[Callable[..., Session]]:
         s.close()
     for e in engines:
         e.dispose()
+
+
+# ---------------------------------------------------------------- signing in
+
+
+class SignedInClient(FlaskClient):
+    """A test client that carries a session, and the CSRF token with it.
+
+    The header is attached automatically because otherwise every mutating
+    request in the suite would have to remember it, and the ones that forgot
+    would fail for a reason that looks like the thing under test. A test that
+    is *about* the CSRF check clears `csrf_token` and gets a client that omits
+    it.
+    """
+
+    csrf_token: str | None = None
+
+    def open(self, *args: object, **kwargs: object) -> object:
+        if self.csrf_token:
+            headers = Headers(kwargs.get("headers") or {})
+            if CSRF_HEADER not in headers:
+                headers[CSRF_HEADER] = self.csrf_token
+            kwargs["headers"] = headers
+        return super().open(*args, **kwargs)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def sign_in(app: Flask) -> Callable[[FlaskClient, int], str]:
+    """Open a real session for `user_id` and give the client its cookie.
+
+    This replaces `app.config["DEV_ACTOR_ID"] = user_id`, which is how every
+    HTTP test used to authenticate. That is not a cosmetic change: Gate 1
+    found that keeping a config-based identity alive alongside a real one fails
+    open whichever order the two are read in, and **the pressure to keep 201
+    tests green was exactly what would have kept it alive.** So the setting is
+    gone and the tests mint a session like a browser does.
+
+    Returns the CSRF token, and attaches it to the client.
+    """
+
+    def _sign_in(client: FlaskClient, user_id: int) -> str:
+        with app.app_context():
+            issued = SessionService(db.session).begin(user_id)
+            db.session.commit()
+        client.set_cookie(SESSION_COOKIE, issued.token)
+        if isinstance(client, SignedInClient):
+            client.csrf_token = issued.csrf_token
+        return issued.csrf_token
+
+    return _sign_in
+
+
+@pytest.fixture
+def client(app: Flask, alice: int, session: Session) -> Iterator[FlaskClient]:
+    """A test client holding a real session for alice.
+
+    It used to be `app.config["DEV_ACTOR_ID"] = alice`, defined in
+    `test_api_contract.py`. That setting is gone, and it lives here now because
+    every HTTP test in the suite wants the same thing: a client that is signed
+    in the way a browser is.
+
+    Gate 1's reasoning, kept where the change happened: a config-based identity
+    alongside a real one fails open whichever order the two are read in, and
+    the pressure to keep this very fixture working is what would have kept the
+    config version alive.
+    """
+    app.test_client_class = SignedInClient
+    with app.test_client() as test_client:
+        with app.app_context():
+            issued = SessionService(db.session).begin(alice)
+            db.session.commit()
+        test_client.set_cookie(SESSION_COOKIE, issued.token)
+        if isinstance(test_client, SignedInClient):
+            test_client.csrf_token = issued.csrf_token
+        yield test_client
 
 
 # ---------------------------------------------------------------- data builders

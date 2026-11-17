@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from file_explorer import problems
+from file_explorer import auth as auth_module, problems
 from file_explorer.config import Config, engine_options
 from file_explorer.extensions import db, limiter, migrate
 from file_explorer.problems import PROBLEM_CONTENT_TYPE
@@ -135,9 +135,17 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # again here raises DuplicateComponentNameError.
     api = ProblemApi(app)
 
+    from file_explorer.blueprints.auth import blp as auth_blp
     from file_explorer.blueprints.nodes import blp as nodes_blp
 
+    api.register_blueprint(auth_blp)
     api.register_blueprint(nodes_blp)
+
+    # **After the blueprints.** `before_request` functions run in registration
+    # order, and this one resolves the session every route depends on, so it
+    # would be equally correct earlier -- but registering it here keeps the
+    # reading order honest: routes exist, then the thing that guards them.
+    auth_module.register(app)
 
     # After the blueprint: smorest registers its shared error response while
     # wiring routes, so doing this at Api() time finds nothing.

@@ -127,3 +127,44 @@ def clean(raw: object) -> str:
         raise InvalidName
 
     return name
+
+
+# --- email ----------------------------------------------------------------
+
+# The practical maximum per RFC 3696 erratum 1690, matching `models/user.py`.
+MAX_EMAIL_LENGTH = 320
+
+
+def normalise_email(raw: str) -> str:
+    """One spelling per address, decided in Python rather than by the database.
+
+    `uq_users_email_lower` is a unique index on `lower(email)`, and `lower()`
+    does not mean the same thing everywhere this runs. The deployed database is
+    `C.UTF-8` under PostgreSQL's **builtin** provider, where `lower()` applies
+    Unicode simple case mapping; CI's containers are `--locale=C` under
+    **libc**, where only ASCII `A`-`Z` are letters. So the index disagrees with
+    itself across environments about whether two addresses are one account --
+    in both directions, and the CI assertion that looks like it covers this
+    uses `A@EXAMPLE.COM`, which is pure ASCII and passes either way.
+
+    Normalising before the address reaches the index makes that divergence stop
+    mattering: every row is stored in one spelling, so `lower()` has nothing
+    left to disagree about. The index stays as a second line of defence.
+
+    What this does, and the reason for each:
+
+    * **NFC**, like node names, so two byte sequences that render identically
+      cannot become two accounts.
+    * **Strip surrounding whitespace.** A pasted address regularly carries it,
+      and an address stored with a trailing space is one no later lookup will
+      match -- the user would be told their password is wrong forever.
+    * **Casefold**, not `lower()`. Full Unicode case folding, done once, in a
+      place whose behaviour does not depend on how the database was
+      initialised.
+
+    What it deliberately does not do: strip dots, drop `+tags`, or treat
+    provider-specific aliasing as equivalence. Those are rules about particular
+    mail providers, they change, and getting them wrong merges two people's
+    accounts.
+    """
+    return unicodedata.normalize("NFC", raw).strip().casefold()

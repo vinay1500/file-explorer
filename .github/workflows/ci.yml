@@ -129,8 +129,6 @@ jobs:
         run: python3 tools/check_format.py tools apps/api
 
       - name: OpenAPI document is current
-        env:
-          DEV_ACTOR_ID: 1
         run: |
           python - <<'PY' > /tmp/openapi.json
           import json
