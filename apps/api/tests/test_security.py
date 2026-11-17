@@ -140,11 +140,27 @@ def test_registration_normalises_the_address_before_storing_it(
     unique index cannot be the only thing deciding whether two addresses are
     one account.
     """
-    for spelling in ("  Mixed.Case@Example.COM  ", "mixed.case@example.com"):
-        anon.post("/api/v1/auth/register", json={"email": spelling, "password": PASSWORD})
+    # One registration, in one spelling, and the assertion is on the form that
+    # reached the table.
+    #
+    # The first version of this test posted two spellings and asserted the
+    # table held one row. It could not fail: the untrimmed spelling is
+    # rejected by `fields.Email` before any handler runs, so only the second
+    # ever arrived, and the surviving row was already lowercase. Deleting
+    # `normalise_email` entirely left the assertion true.
+    assert (
+        anon.post(
+            "/api/v1/auth/register",
+            json={"email": "Mixed.Case@Example.COM", "password": PASSWORD},
+        ).status_code
+        == 202
+    )
 
     stored = session.execute(text("SELECT email FROM users")).scalars().all()
-    assert stored == ["mixed.case@example.com"], f"stored {stored}"
+    assert stored == ["mixed.case@example.com"], (
+        f"stored {stored} -- without normalisation this is the spelling the caller sent, and "
+        "every later lookup casefolds before comparing, so the account would be unreachable"
+    )
 
 
 # --- the session itself ---------------------------------------------------
@@ -849,3 +865,126 @@ def test_the_losing_registration_is_202_not_500(
         text("SELECT count(*) FROM users WHERE email = 'contested@example.com'")
     ).scalar_one()
     assert count == 1, "the race created a second account"
+
+
+# --- what Gate 3 found ----------------------------------------------------
+
+
+@pytest.mark.invariant
+def test_a_failed_authentication_is_still_counted(app: Flask) -> None:
+    """Gate 3's G3-01: a rejection that costs the caller nothing is not a limit.
+
+    `authenticate` used to raise, and it is registered before the limiter so
+    that the key is settled before the limiter asks. Flask stops walking
+    `before_request` at the first exception -- so the limiter's own hook never
+    ran for a request that failed authentication, and anything presenting a bad
+    cookie could be sent indefinitely at no cost.
+
+    Resolve, count, enforce: three hooks, in that order.
+    """
+    from file_explorer.extensions import limiter
+
+    limit = int(app.config["RATELIMIT_DEFAULT"].split()[0])
+    anonymous = app.test_client()
+
+    limiter.reset()
+    try:
+        statuses = [anonymous.get("/api/v1/roots").status_code for _ in range(limit + 5)]
+    finally:
+        limiter.reset()
+
+    assert 401 in statuses, "the unauthenticated requests were not rejected at all"
+    assert 429 in statuses, (
+        "a request that fails authentication is never counted, so an attacker can send them "
+        "indefinitely at no cost"
+    )
+
+
+@pytest.mark.invariant
+def test_a_non_ascii_csrf_token_is_403_not_500(client: FlaskClient) -> None:
+    """Gate 3's G3-04.
+
+    Werkzeug decodes WSGI header values as latin-1, so a byte above 0x7F
+    arrives as a `str` with non-ASCII code points -- and `hmac.compare_digest`
+    raises `TypeError` on exactly that, which escapes to the last-resort
+    handler. The caller gets 500 where 403 was meant: a cheaper request to
+    send and a noisier one to receive.
+    """
+    response = client.post(
+        "/api/v1/nodes",
+        json={"parent_id": None, "name": "x", "type": "folder"},
+        headers={CSRF_HEADER: "tokén-with-an-accent"},
+    )
+    assert response.status_code == 403, response.get_data(as_text=True)
+
+
+@pytest.mark.invariant
+def test_a_proxied_deployment_must_declare_its_hop_count() -> None:
+    """Gate 3's BLOCK, as a startup check.
+
+    Behind a proxy with `TRUST_PROXY_HOPS = 0`, `remote_addr` is the proxy for
+    every caller on earth -- so the credential routes' ten-per-minute limit is
+    ten per minute *in total*, and one script locks everybody out of sign-in at
+    negligible cost. D-22's rewrite puts a proxy in front of this API
+    unconditionally, so that is the default shape.
+
+    Nothing at the HTTP level sees it: under the test client `remote_addr` is
+    the real caller, so every rate-limit test passes while describing a world
+    the deployment is not in.
+    """
+    from file_explorer.app import create_app
+    from file_explorer.config import Config
+
+    class Proxied(Config):
+        BEHIND_PROXY = True
+        TRUST_PROXY_HOPS = 0
+
+    with pytest.raises(RuntimeError, match="TRUST_PROXY_HOPS"):
+        create_app(Proxied)
+
+    class Declared(Proxied):
+        TRUST_PROXY_HOPS = 1
+
+    create_app(Declared)
+
+
+@pytest.mark.invariant
+def test_samesite_none_without_secure_is_refused_at_startup() -> None:
+    """Gate 3's G3-05. Every current browser refuses to store that cookie.
+
+    The easier failure to reach than the cross-site one, because turning
+    `Secure` off is what somebody does to make a thing work over plain HTTP.
+    """
+    from file_explorer.app import create_app
+    from file_explorer.config import Config
+
+    class Insecure(Config):
+        AUTH_COOKIE_SAMESITE = "None"
+        AUTH_COOKIE_SECURE = False
+
+    with pytest.raises(RuntimeError, match="AUTH_COOKIE_SECURE"):
+        create_app(Insecure)
+
+
+@pytest.mark.invariant
+def test_registration_does_not_report_success_for_a_constraint_violation(
+    anon: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gate 3's G3-03: 202 on *any* integrity error reports an account that does not exist.
+
+    `IntegrityError` wraps every integrity condition, not just a unique
+    violation, and `users` carries three check constraints. Only 23505 means
+    "somebody else got there first"; everything else has to surface.
+    """
+    monkeypatch.setattr(
+        "file_explorer.blueprints.auth.passwords.hash_password",
+        lambda _password: "not an argon2id hash",
+    )
+
+    response = anon.post(
+        "/api/v1/auth/register", json={"email": "bad-hash@example.com", "password": PASSWORD}
+    )
+    assert response.status_code == 500, (
+        "a check-constraint violation was reported as 202, so the caller believes an account "
+        "exists that does not"
+    )

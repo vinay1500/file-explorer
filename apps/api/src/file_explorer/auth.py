@@ -116,14 +116,27 @@ def unauthenticated() -> Unauthorized:
 
 
 def authenticate() -> None:
-    """Resolve the session before anything else looks at the request.
+    """Resolve the session. **Decide nothing and raise nothing.**
 
-    Registered as a `before_request`, so it runs ahead of body validation and a
-    missing session is a 401 rather than a 422 about a field the caller was
-    never going to be allowed to send.
+    This is one of a pair, and the split is the whole design.
+
+    The first version resolved and refused in one hook registered before
+    `limiter.init_app`, which is where the key has to be settled. But Flask
+    walks `before_request` functions in order and an exception leaves the loop
+    -- so **the limiter's own hook never ran for a request that failed here**,
+    and anything presenting a bad cookie or no CSRF token was never counted. A
+    script could hammer a protected route indefinitely at no cost.
+
+    So: this hook writes the answer onto `g` and returns. The limiter reads it
+    and counts. `enforce_authentication`, registered *after* the limiter,
+    raises. Three jobs, in the order they have to happen in.
+
+    The 401-before-422 property survives, because all three are still
+    `before_request` and the view's `@blp.arguments` has not run yet.
     """
     g.actor_id = None
     g.csrf_token = None
+    g.auth_failure = None
 
     rule = request.url_rule
     if rule is None or rule.rule in PUBLIC_RULES:
@@ -135,19 +148,48 @@ def authenticate() -> None:
         # An expired row may have been deleted while resolving it. Committing
         # here keeps that tidy-up even though the request is about to fail.
         db.session.commit()
-        raise unauthenticated()
+        g.auth_failure = "unauthenticated"
+        return
 
-    if request.method not in SAFE_METHODS:
-        supplied = request.headers.get(CSRF_HEADER, "")
-        # Constant time, and `hmac.compare_digest` rather than `==` -- the
-        # comparison is against a value an attacker can guess at repeatedly.
-        if not supplied or not hmac.compare_digest(supplied, resolved.csrf_token):
-            db.session.commit()
-            raise Forbidden("A valid CSRF token is required for this request.")
+    if request.method not in SAFE_METHODS and not _csrf_token_matches(resolved.csrf_token):
+        db.session.commit()
+        g.auth_failure = "csrf"
+        return
 
     g.actor_id = resolved.actor_id
     g.csrf_token = resolved.csrf_token
     db.session.commit()
+
+
+def _csrf_token_matches(expected: str) -> bool:
+    """Constant time, and it has to survive a header the caller controls.
+
+    `hmac.compare_digest` rather than `==`, because the comparison is against a
+    value an attacker can guess at repeatedly.
+
+    The `isascii()` guard is not belt and braces. Werkzeug decodes WSGI header
+    values as latin-1, so any byte above 0x7F arrives as a `str` carrying
+    non-ASCII code points -- and `compare_digest` raises `TypeError` on exactly
+    that. The `TypeError` escapes to the last-resort handler and the caller
+    gets **500 where 403 was meant**, which is a cheaper request to send and a
+    noisier one to receive.
+    """
+    supplied = request.headers.get(CSRF_HEADER, "")
+    if not supplied or not supplied.isascii():
+        return False
+    return hmac.compare_digest(supplied, expected)
+
+
+def enforce_authentication() -> None:
+    """Refuse, now that the limiter has had its turn.
+
+    Registered after `limiter.init_app` on purpose -- see `authenticate`.
+    """
+    failure = getattr(g, "auth_failure", None)
+    if failure == "csrf":
+        raise Forbidden("A valid CSRF token is required for this request.")
+    if failure is not None:
+        raise unauthenticated()
 
 
 def require_actor() -> int:
@@ -201,5 +243,11 @@ def clear_session_cookie(response: Response, *, secure: bool, samesite: str) -> 
     )
 
 
-def register(app: Flask) -> None:
+def register_resolver(app: Flask) -> None:
+    """Hook one: resolve. Must be registered **before** `limiter.init_app`."""
     app.before_request(authenticate)
+
+
+def register_enforcer(app: Flask) -> None:
+    """Hook three: refuse. Must be registered **after** `limiter.init_app`."""
+    app.before_request(enforce_authentication)

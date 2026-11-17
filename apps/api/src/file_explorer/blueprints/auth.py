@@ -120,16 +120,23 @@ class Register(MethodView):
             db.session.add(User(email=email, password_hash=encoded))
             try:
                 db.session.commit()
-            except IntegrityError:
-                # Two requests for the same address raced past the check above
-                # and the unique index settled it. Without this the loser is an
-                # unhandled 500 -- which is both a crash and an oracle, because
-                # a 500 here means "somebody else just registered this".
-                #
-                # The answer is the same 202 either way, which is the point:
-                # the race is invisible to both callers, and exactly one
-                # account exists afterwards.
+            except IntegrityError as exc:
                 db.session.rollback()
+                # **Only a unique violation.** `IntegrityError` is SQLAlchemy's
+                # wrapper for every integrity condition, so catching it bare
+                # swallows a check-constraint violation and a foreign-key one
+                # too -- and `users` has three check constraints, one of which
+                # (`password_hash LIKE '$argon2id$%'`) fires if the hashing
+                # ever produces something unexpected. Answering 202 to that
+                # would report success for an account that does not exist.
+                #
+                # 23505 is unique_violation, which here can only mean two
+                # requests for one address raced past the probe above and the
+                # index settled it. The answer is the same 202 either way:
+                # the race is invisible to both callers and exactly one
+                # account exists afterwards.
+                if getattr(exc.orig, "sqlstate", None) != "23505":
+                    raise
 
         return {"accepted": True}
 

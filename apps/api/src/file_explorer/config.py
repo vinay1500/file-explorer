@@ -119,6 +119,21 @@ class Config:
     # to the real number of hops; do not guess high.
     TRUST_PROXY_HOPS = int(os.environ.get("TRUST_PROXY_HOPS", "0"))
 
+    # Whether anything sits in front of this application. Separate from the hop
+    # count on purpose: the count is a number somebody has to measure, and this
+    # is the statement that measuring it is required.
+    #
+    # D-22 put a proxy in front of the API unconditionally -- the rewrite in
+    # `vercel.json` -- so in the deployed shape every request arrives from an
+    # edge address. With `TRUST_PROXY_HOPS = 0` that address is the key the
+    # rate limiter counts against, and **the whole internet shares one
+    # bucket**: ten login attempts a minute in total, so one script makes
+    # sign-in return 429 for everybody at negligible cost.
+    #
+    # `create_app` refuses to start on the combination. See
+    # `_assert_the_limiter_can_tell_callers_apart`.
+    BEHIND_PROXY = os.environ.get("BEHIND_PROXY", "0") == "1"
+
     RATELIMIT_STORAGE_URI = os.environ.get("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "120 per minute")
     RATELIMIT_HEADERS_ENABLED = True
