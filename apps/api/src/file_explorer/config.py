@@ -59,10 +59,26 @@ class Config:
     # The `Exception` handler already covers everything raised inside dispatch,
     # so the setting bought nothing and cost the last-resort guarantee.
 
-    # Who the API thinks is calling, until M5. No default on purpose: a
-    # deployment that forgets this fails closed with 401 rather than open on
-    # somebody's tree. See `auth.require_actor`.
-    DEV_ACTOR_ID = int(os.environ["DEV_ACTOR_ID"]) if os.environ.get("DEV_ACTOR_ID") else None
+    # --- session cookie ---------------------------------------------------
+    #
+    # `DEV_ACTOR_ID` used to live here. It is deleted rather than defaulted,
+    # and deleted in the same change that taught `require_actor()` to read a
+    # session, because any version that keeps both sources fails open: config
+    # first serves every request as one user, config as a fallback serves every
+    # unauthenticated one. See `auth.py`.
+
+    # Off only where there is no HTTPS, which is the Compose stack. Anywhere
+    # real this is 1, and `0` in a deployed environment is the mistake this
+    # setting exists to make visible rather than silent.
+    AUTH_COOKIE_SECURE = os.environ.get("AUTH_COOKIE_SECURE", "1") == "1"
+
+    # `Lax` is correct **because D-22 makes the browser same-site**: the
+    # frontend reaches the API through a rewrite on its own origin, so the
+    # cookie is never sent cross-site and never needs `None`. If the two halves
+    # are ever split across registrable domains again, `Lax` stops being sent
+    # at all and the demo silently cannot sign in -- which is the Gate 1 BLOCK
+    # that produced D-22.
+    AUTH_COOKIE_SAMESITE = os.environ.get("AUTH_COOKIE_SAMESITE", "Lax")
 
     # A name is at most 255 characters, so a request body has no business being
     # large. Werkzeug raises 413 above this, before the body is read into

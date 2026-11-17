@@ -19,7 +19,7 @@ which was true of the session rules and false of fourteen names covering behavio
 already shipped under better names. A blanket hedge in a preamble gets read as covering
 everything underneath it.
 
-`apps/api/tests/test_security.py` *(planned, M5.4)* is the dedicated suite for the session and
+`apps/api/tests/test_security.py` is the dedicated suite for the session and
 enumeration rules in §2.5 and §2.6.
 
 ---
@@ -106,8 +106,10 @@ cross-site request vector.
 - Because the credential is a cookie, CSRF protection is mandatory: a double-submit token
   required on every mutating request, compared against the cookie.
 - Short access-token lifetime with refresh; logout clears the cookie server-side.
-- Tests: `test_mutation_without_csrf_token_rejected` *(planned, M5.1)*,
-  `test_cookie_flags_set` *(planned, M5.1)*.
+- Tests: `test_mutation_without_csrf_token_rejected`, `test_cookie_flags_set`,
+  `test_another_sessions_csrf_token_does_not_work` -- which is the one that separates a
+  synchronizer token from a double-submit one, because it refuses a real, live,
+  correctly-shaped token belonging to a different session.
 
 ### 2.6 Authentication endpoints
 
@@ -115,7 +117,9 @@ cross-site request vector.
 - Rate limiting on register, login and refresh, by IP and by account.
 - Login returns the same response and the same timing class for an unknown email and a wrong
   password. No user enumeration.
-- Test: `test_login_does_not_enumerate_users` *(planned, M5.4)*.
+- Tests: `test_login_does_not_enumerate_users`, and
+  `test_login_hashes_even_when_no_user_exists`, which asserts the mechanism rather than
+  measuring a clock -- a timing assertion on a shared runner measures the runner.
 
 ### 2.7 Denial of service through the tree
 

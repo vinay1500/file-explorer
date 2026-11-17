@@ -127,7 +127,14 @@ def upgrade() -> None:
         "password_hash LIKE '$argon2id$%'",
     )
     op.create_check_constraint("email_not_blank", "users", "email <> ''")
-    op.create_check_constraint("email_trimmed", "users", "email = btrim(email, ' \\t\\n\\r')")
+    # `E'...'` and not `'...'`. In a standard SQL string `\t` is a backslash
+    # followed by `t`, so the trim set would be the five characters space,
+    # backslash, t, n and r -- and `btrim('new@example.com', ...)` would strip
+    # the leading `n`, making the constraint reject an address that is already
+    # trimmed. This is the second time `btrim` has been written this way here;
+    # the first was G-02, where one argument trimmed spaces only and a
+    # tab-only name got through.
+    op.create_check_constraint("email_trimmed", "users", r"email = btrim(email, E' \t\n\r\f\v')")
 
 
 def downgrade() -> None:

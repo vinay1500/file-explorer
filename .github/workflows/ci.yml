@@ -129,8 +129,6 @@ jobs:
         run: python3 tools/check_format.py tools apps/api
 
       - name: OpenAPI document is current
-        env:
-          DEV_ACTOR_ID: 1
         run: |
           python - <<'PY' > /tmp/openapi.json
           import json
@@ -257,6 +255,17 @@ jobs:
                     VALUES (9, ' spaced@example.com ', '$H');" \
             || fail "an untrimmed email was accepted"
           echo "  untrimmed email rejected"
+
+          # The other direction, which is where the bug was. Written as a
+          # standard SQL string, btrim's trim set becomes space, backslash, t,
+          # n and r -- so an address beginning with `n` has its first letter
+          # stripped and a perfectly trimmed address is rejected. Second time
+          # btrim has been written that way in this repository.
+          psql -v ON_ERROR_STOP=1 -c "
+            INSERT INTO users (id, email, password_hash)
+              VALUES (10, 'new@example.com', '$H');
+            DELETE FROM users WHERE id = 10;" >/dev/null
+          echo "  an address starting with a letter in the trim set is accepted"
 
           # Sessions cascade from the user. The point of D-21 is that a row can
           # be deleted; the point of the cascade is that deleting the account

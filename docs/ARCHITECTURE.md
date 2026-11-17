@@ -316,7 +316,7 @@ file-explorer/
 │   │   │   ├── test_tree_invariants.py
 │   │   │   ├── test_concurrency.py
 │   │   │   ├── test_api_contract.py
-│   │   │   └── test_security.py          (planned, M5.4)
+│   │   │   └── test_security.py
 │   │   ├── Dockerfile
 │   │   ├── pyproject.toml
 │   │   └── .env.example

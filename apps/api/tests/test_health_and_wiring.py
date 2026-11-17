@@ -13,26 +13,28 @@ well-covered file can still have nothing behind the five lines that matter.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
 
 import pytest
 from flask import Flask, request
+from flask.testing import FlaskClient
 from sqlalchemy.exc import OperationalError
 
+from file_explorer import auth
 from file_explorer.app import create_app
 from file_explorer.config import Config
 from file_explorer.extensions import db, limiter
 
 
 @pytest.fixture
-def wired(app: Flask) -> Iterator[Flask]:
-    """The session app with an actor configured, restored afterwards."""
-    previous = app.config.get("DEV_ACTOR_ID")
-    app.config["DEV_ACTOR_ID"] = 1
-    try:
-        yield app
-    finally:
-        app.config["DEV_ACTOR_ID"] = previous
+def wired(app: Flask) -> Flask:
+    """The session app.
+
+    It used to configure an actor. There is no configurable actor any more --
+    `DEV_ACTOR_ID` was deleted with the change that made `require_actor()` read
+    a session -- so the fixture is the app, and the tests that need to be
+    signed in say so by asking for `client`.
+    """
+    return app
 
 
 # ----------------------------------------------------------- the health check
@@ -97,6 +99,7 @@ def test_health_reports_degraded_when_the_database_is_unreachable(
 @pytest.mark.invariant
 def test_an_unexpected_error_inside_a_route_does_not_leak(
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The `Exception` handler, which had never run.
 
@@ -106,7 +109,12 @@ def test_an_unexpected_error_inside_a_route_does_not_leak(
     which resolves to the `HTTPException` handler.
     """
     built = create_app(Config)
-    built.config["DEV_ACTOR_ID"] = 1
+
+    # Public for the duration, rather than given a session: this test is about
+    # what the last-resort handler does with an exception, not about who was
+    # allowed to cause one. Through `monkeypatch` so the allowlist is restored
+    # -- a module-level set that one test widens is a set that stays wide.
+    monkeypatch.setattr(auth, "PUBLIC_RULES", auth.PUBLIC_RULES | {"/api/v1/boom"})
 
     @built.get("/api/v1/boom")
     def _boom() -> str:
@@ -133,7 +141,9 @@ def test_an_unexpected_error_inside_a_route_does_not_leak(
 
 
 @pytest.mark.invariant
-def test_a_forwarded_address_is_trusted_only_when_configured() -> None:
+def test_a_forwarded_address_is_trusted_only_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`TRUST_PROXY_HOPS` is the difference between two opposite failures.
 
     Zero and behind a balancer: every caller shares the balancer's address, so
@@ -150,6 +160,11 @@ def test_a_forwarded_address_is_trusted_only_when_configured() -> None:
         TRUST_PROXY_HOPS = 1
 
     seen: dict[str, str | None] = {}
+
+    # Public for the duration: `before_request` would 401 this ad-hoc route
+    # before the view could record anything, and what is under test is which
+    # address ProxyFix leaves behind, not who is allowed to ask.
+    monkeypatch.setattr(auth, "PUBLIC_RULES", auth.PUBLIC_RULES | {"/api/v1/whoami"})
 
     def record(built: Flask) -> str | None:
         @built.get("/api/v1/whoami")
@@ -195,7 +210,9 @@ def test_the_error_response_component_is_retyped_or_says_why(
 
 
 @pytest.mark.invariant
-def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem() -> None:
+def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The `ValidationError` handler, which no HTTP request reaches.
 
     flask-smorest catches marshmallow inside `@blp.arguments` and re-raises it
@@ -206,6 +223,12 @@ def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem() -> None
     from marshmallow import ValidationError
 
     built = create_app(Config)
+
+    # Public for the duration. Authentication runs in `before_request` now, so
+    # an ad-hoc route on a fresh app is a 401 before the view raises anything
+    # -- which is the point of moving it there, and is why this test went red
+    # on a change that had nothing to do with validation.
+    monkeypatch.setattr(auth, "PUBLIC_RULES", auth.PUBLIC_RULES | {"/api/v1/validate"})
 
     @built.get("/api/v1/validate")
     def _validate() -> str:
@@ -250,7 +273,9 @@ def test_a_repr_does_not_carry_user_content(session: object, alice: int) -> None
 
 
 @pytest.mark.invariant
-def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not(wired: Flask) -> None:
+def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not(
+    wired: Flask, client: FlaskClient
+) -> None:
     """Both arms of the header strip, driven against the real configured limit.
 
     Two earlier attempts at this were wrong in instructive ways.
@@ -271,8 +296,6 @@ def test_a_rate_limited_response_keeps_retry_after_and_the_rest_do_not(wired: Fl
     test in the same minute is sharing.
     """
     limit = int(wired.config["RATELIMIT_DEFAULT"].split()[0])
-    client = wired.test_client()
-
     limiter.reset()
     try:
         responses = [client.get("/api/v1/roots") for _ in range(limit + 5)]
@@ -344,6 +367,10 @@ ALLOWED_RULES = frozenset(
         "/static/<path:filename>",
         "/api/openapi.json",
         "/api/v1/health",
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",
+        "/api/v1/auth/me",
         "/api/v1/roots",
         "/api/v1/nodes",
         "/api/v1/nodes/<int:node_id>",

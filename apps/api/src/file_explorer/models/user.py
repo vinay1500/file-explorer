@@ -77,7 +77,7 @@ class User(Base):
         # scheme should require a migration that says so, rather than two
         # formats quietly coexisting while one of them stops verifying.
         CheckConstraint("password_hash LIKE '$argon2id$%'", name="password_hash_is_argon2id"),
-        CheckConstraint("email = btrim(email, ' \t\n\r')", name="email_trimmed"),
+        CheckConstraint(r"email = btrim(email, E' \t\n\r\f\v')", name="email_trimmed"),
         CheckConstraint("email <> ''", name="email_not_blank"),
     )
 
