@@ -24,6 +24,10 @@ dependencies = [
     # Rate limiting. In-memory by default, which is per-process and therefore
     # wrong across workers -- see the comment where it is configured.
     "Flask-Limiter>=3.8",
+    # Password hashing. argon2id, at OWASP's minimum recommended configuration
+    # rather than the library's defaults -- see `passwords.py` for why the
+    # defaults do not fit a 512 MB shared instance.
+    "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]

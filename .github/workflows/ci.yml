@@ -188,8 +188,14 @@ jobs:
         run: |
           # Each guard is tested by trying to violate it. A constraint that
           # exists but does not fire is worse than none, because it is trusted.
+          # Defined before the first use, which it was not: the insert below ran
+          # with $H unset and wrote an empty hash. Single quotes because an
+          # argon2id hash is full of `$` and every statement here is
+          # inside a double-quoted argument.
+          H='$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$Qx6sB0nMOSSz0CqN8nUfsFYQkOaJ5cPGNSDJBzqfKPo'
+
           psql -v ON_ERROR_STOP=1 -c "
-            INSERT INTO users (id, email) VALUES (1, 'a@example.com');
+            INSERT INTO users (id, email, password_hash) VALUES (1, 'a@example.com', '$H');
             INSERT INTO nodes (id, owner_id, parent_id, name, type)
               VALUES (1, 1, NULL, 'docs', 'folder');" >/dev/null
 
@@ -204,7 +210,10 @@ jobs:
             if out=$(psql -v ON_ERROR_STOP=1 -c "$1" 2>&1); then
               return 1   # statement succeeded, so nothing was rejected
             fi
-            if echo "$out" | grep -qE 'violates (check|unique|foreign key) constraint|duplicate key value'; then
+            # not-null is listed because dropping a column default makes the
+            # omitted-column case a NOT NULL violation rather than a check
+            # violation, and that is still the guard firing.
+            if echo "$out" | grep -qE 'violates (check|unique|foreign key|not-null) constraint|duplicate key value'; then
               return 0
             fi
             echo "::error::statement failed, but not from a constraint:"
@@ -226,9 +235,59 @@ jobs:
             || fail "whitespace-only name was accepted"
           echo "  blank name rejected"
 
-          rejected "INSERT INTO users (id, email) VALUES (2, 'A@EXAMPLE.COM');" \
+          rejected "INSERT INTO users (id, email, password_hash) VALUES (2, 'A@EXAMPLE.COM', '$H');" \
             || fail "email uniqueness is case-sensitive"
           echo "  case-insensitive email uniqueness confirmed"
+
+          # 0003. The column used to be NOT NULL DEFAULT '', so every row ever
+          # inserted held a hash nothing could verify and the schema called it
+          # a credential. The constraint is the encoding, not "not empty":
+          # "not empty" cannot tell a hash from the word hash.
+          rejected "INSERT INTO users (id, email, password_hash)
+                    VALUES (9, 'blank@example.com', '');" \
+            || fail "an empty password_hash was accepted"
+          rejected "INSERT INTO users (id, email, password_hash)
+                    VALUES (9, 'notahash@example.com', 'hunter2');" \
+            || fail "a password_hash that is not an argon2id hash was accepted"
+          rejected "INSERT INTO users (id, email) VALUES (9, 'nodefault@example.com');" \
+            || fail "password_hash still has a server default"
+          echo "  password_hash must be an argon2id hash, and has no default"
+
+          rejected "INSERT INTO users (id, email, password_hash)
+                    VALUES (9, ' spaced@example.com ', '$H');" \
+            || fail "an untrimmed email was accepted"
+          echo "  untrimmed email rejected"
+
+          # Sessions cascade from the user. The point of D-21 is that a row can
+          # be deleted; the point of the cascade is that deleting the account
+          # deletes the sessions rather than leaving credentials behind.
+          psql -v ON_ERROR_STOP=1 -c "
+            INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+              VALUES (sha256('t1'::bytea), 1, repeat('c', 32), now() + interval '1 day');"
+          left=$(psql -tAc "SELECT count(*) FROM sessions WHERE user_id = 1;")
+          [ "$left" = "1" ] || fail "the session row was not created"
+
+          rejected "INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+                    VALUES (sha256('t2'::bytea), 1, 'short', now() + interval '1 day');" \
+            || fail "a CSRF token under 16 characters was accepted"
+          rejected "INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+                    VALUES (sha256('t3'::bytea), 1, repeat('c', 32), now() - interval '1 day');" \
+            || fail "a session expiring before it was created was accepted"
+          rejected "INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+                    VALUES (sha256('t4'::bytea), 404, repeat('c', 32), now() + interval '1 day');" \
+            || fail "a session for a user that does not exist was accepted"
+          # The cascade itself, on a throwaway user so the rows the later
+          # assertions depend on are untouched. This is the property that makes
+          # D-21 worth having: a deleted account cannot leave a live credential.
+          psql -v ON_ERROR_STOP=1 -c "
+            INSERT INTO users (id, email, password_hash)
+              VALUES (9, 'doomed@example.com', '$H');
+            INSERT INTO sessions (token_hash, user_id, csrf_token, expires_at)
+              VALUES (sha256('t9'::bytea), 9, repeat('c', 32), now() + interval '1 day');
+            DELETE FROM users WHERE id = 9;" >/dev/null
+          orphans=$(psql -tAc "SELECT count(*) FROM sessions WHERE user_id = 9;")
+          [ "$orphans" = "0" ] || fail "deleting a user left $orphans session(s) behind"
+          echo "  session constraints bite, and sessions die with their user"
 
           # G-02: btrim(name) with one argument trims SPACES only, so a tab
           # survives it. Red until the constraint is widened.
@@ -243,7 +302,7 @@ jobs:
           # their folder cascades into the attacker's subtree. Red until the
           # composite foreign key lands.
           psql -v ON_ERROR_STOP=1 -c "
-            INSERT INTO users (id, email) VALUES (2, 'b@example.com');
+            INSERT INTO users (id, email, password_hash) VALUES (2, 'b@example.com', '$H');
             INSERT INTO nodes (id, owner_id, parent_id, name, type)
               VALUES (6, 2, NULL, 'bob-root', 'folder');" >/dev/null
           rejected "INSERT INTO nodes (id, owner_id, parent_id, name, type)

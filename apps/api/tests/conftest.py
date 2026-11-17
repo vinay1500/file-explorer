@@ -122,12 +122,39 @@ def new_session() -> Iterator[Callable[..., Session]]:
 # ---------------------------------------------------------------- data builders
 
 
+# A well-formed argon2id hash that **no password matches**, and that is
+# deliberate rather than a limitation.
+#
+# The suite creates users constantly and almost none of those tests cares about
+# logging in. Hashing a real password for each would add a memory-hard
+# computation per fixture for no coverage, so this is a structurally valid
+# encoded hash at the parameters in `passwords.py` with a fixed salt and a
+# digest that is not the digest of anything: the library parses it and every
+# verification against it is a clean mismatch.
+#
+# A test that needs a working login hashes its own password in the test and
+# passes the result here. That keeps the expensive call in the handful of tests
+# that are about authentication.
+#
+# `make_user` requires a hash rather than letting the column default, which is
+# the whole point. `password_hash` carried `server_default=""` until migration
+# 0003, so this fixture used to insert rows no login path could ever
+# authenticate -- and the login tests would then have been written against that
+# population and passed while every real row answered 500. Gate 1 found it
+# before any login code existed.
+FIXTURE_HASH = (
+    "$argon2id$v=19$m=19456,t=2,p=1$"
+    "c2FsdHNhbHRzYWx0c2FsdA$Qx6sB0nMOSSz0CqN8nUfsFYQkOaJ5cPGNSDJBzqfKPo"
+)
+
+
 @pytest.fixture
-def make_user(session: Session) -> Callable[[str], int]:
-    def _make(email: str) -> int:
+def make_user(session: Session) -> Callable[..., int]:
+    def _make(email: str, password_hash: str = FIXTURE_HASH) -> int:
         return int(
             session.execute(
-                text("INSERT INTO users (email) VALUES (:e) RETURNING id"), {"e": email}
+                text("INSERT INTO users (email, password_hash) VALUES (:e, :h) RETURNING id"),
+                {"e": email, "h": password_hash},
             ).scalar_one()
         )
 
