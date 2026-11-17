@@ -210,7 +210,10 @@ jobs:
             if out=$(psql -v ON_ERROR_STOP=1 -c "$1" 2>&1); then
               return 1   # statement succeeded, so nothing was rejected
             fi
-            if echo "$out" | grep -qE 'violates (check|unique|foreign key) constraint|duplicate key value'; then
+            # not-null is listed because dropping a column default makes the
+            # omitted-column case a NOT NULL violation rather than a check
+            # violation, and that is still the guard firing.
+            if echo "$out" | grep -qE 'violates (check|unique|foreign key|not-null) constraint|duplicate key value'; then
               return 0
             fi
             echo "::error::statement failed, but not from a constraint:"
