@@ -401,3 +401,57 @@ def test_a_session_only_ever_sees_its_own_owners_tree(
     # `/nodes/{id}` carries PATCH and DELETE, not GET, so the read that proves
     # isolation is the breadcrumb walk.
     assert as_alice.get(f"/api/v1/nodes/{bobs}/path").status_code == 404
+
+
+# --- the two guards that should never fire --------------------------------
+
+
+@pytest.mark.invariant
+def test_require_actor_fails_closed_if_the_hook_never_ran(app: Flask) -> None:
+    """`authenticate` always runs, and this is what happens when it has not.
+
+    Not a reachable state through HTTP -- it is a `before_request`, so there is
+    no route it does not cover. The branch exists because the alternative when
+    someone later adds a route outside the normal path is an `AttributeError`
+    and a 500, and a 401 is the honest answer to "nobody established who this
+    is". Coverage found it unexercised, which is exactly the kind of line worth
+    exercising: the one that only runs when something else has already gone
+    wrong.
+    """
+    from werkzeug.exceptions import Unauthorized
+
+    from file_explorer.auth import current_csrf_token, require_actor
+
+    with app.test_request_context("/api/v1/roots"):
+        with pytest.raises(Unauthorized):
+            require_actor()
+        with pytest.raises(Unauthorized):
+            current_csrf_token()
+
+
+@pytest.mark.invariant
+def test_a_weaker_stored_hash_is_upgraded_on_a_successful_login(
+    anon: FlaskClient, session: OrmSession
+) -> None:
+    """An encoded hash carries its own parameters, so raising the cost is safe.
+
+    Old hashes keep verifying and are rewritten at the current cost the next
+    time the password is in hand -- which is the only moment it ever is.
+    """
+    from argon2 import PasswordHasher
+
+    weak = PasswordHasher(memory_cost=8, time_cost=1, parallelism=1).hash(PASSWORD)
+    session.execute(
+        text("INSERT INTO users (email, password_hash) VALUES (:e, :h)"),
+        {"e": "weak@example.com", "h": weak},
+    )
+    session.commit()
+
+    response = anon.post(
+        "/api/v1/auth/login", json={"email": "weak@example.com", "password": PASSWORD}
+    )
+    assert response.status_code == 200
+
+    stored = session.execute(text("SELECT password_hash FROM users")).scalar_one()
+    assert stored != weak, "a weaker hash survived a successful login"
+    assert f"m={passwords.MEMORY_COST_KIB}" in stored

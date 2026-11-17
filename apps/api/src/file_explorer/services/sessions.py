@@ -61,7 +61,7 @@ class Resolved:
 
 
 class SessionService:
-    def __init__(self, db: DbSession | scoped_session[DbSession]) -> None:
+    def __init__(self, db: DbSession | scoped_session[Any]) -> None:
         self._db = db
 
     def begin(self, user_id: int, lifetime: timedelta = DEFAULT_LIFETIME) -> Issued:
