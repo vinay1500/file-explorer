@@ -42,10 +42,11 @@ def test_the_document_declares_every_route(client: FlaskClient) -> None:
     assert spec["openapi"].startswith("3.")  # type: ignore[union-attr]
     paths = spec["paths"]
     assert isinstance(paths, dict)
-    assert len(paths) == 10, f"expected ten routes, found {sorted(paths)}"
+    assert len(paths) == 11, f"expected eleven routes, found {sorted(paths)}"
     for route in (
         "/api/v1/auth/register",
         "/api/v1/auth/login",
+        "/api/v1/auth/guest",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
         "/api/v1/roots",
@@ -80,7 +81,15 @@ def test_move_accepts_a_null_destination_in_the_document(client: FlaskClient) ->
 #: Routes reachable without a session, so a documented 401 would be a lie.
 #: Named individually rather than matched by prefix: `/auth/logout` and
 #: `/auth/me` are under the same prefix and both require one.
-PUBLIC_OPERATIONS = frozenset({"POST /api/v1/auth/register", "POST /api/v1/auth/login"})
+PUBLIC_OPERATIONS = frozenset(
+    {
+        "POST /api/v1/auth/register",
+        "POST /api/v1/auth/login",
+        # The demo's front door: it exists to hand a session to somebody who
+        # has none, so a documented 401 on it would be a lie.
+        "POST /api/v1/auth/guest",
+    }
+)
 
 
 @pytest.mark.invariant
