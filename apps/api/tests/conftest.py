@@ -152,7 +152,7 @@ class SignedInClient(FlaskClient):
 
 
 @pytest.fixture
-def sign_in(app: Flask) -> Callable[[FlaskClient, int], str]:
+def sign_in(session: Session) -> Callable[[FlaskClient, int], str]:
     """Open a real session for `user_id` and give the client its cookie.
 
     This replaces `app.config["DEV_ACTOR_ID"] = user_id`, which is how every
@@ -166,9 +166,8 @@ def sign_in(app: Flask) -> Callable[[FlaskClient, int], str]:
     """
 
     def _sign_in(client: FlaskClient, user_id: int) -> str:
-        with app.app_context():
-            issued = SessionService(db.session).begin(user_id)
-            db.session.commit()
+        issued = SessionService(db.session).begin(user_id)
+        db.session.commit()
         client.set_cookie(SESSION_COOKIE, issued.token)
         if isinstance(client, SignedInClient):
             client.csrf_token = issued.csrf_token
@@ -193,9 +192,13 @@ def client(app: Flask, alice: int, session: Session) -> Iterator[FlaskClient]:
     """
     app.test_client_class = SignedInClient
     with app.test_client() as test_client:
-        with app.app_context():
-            issued = SessionService(db.session).begin(alice)
-            db.session.commit()
+        # `session` is `db.session` inside the app context this fixture chain
+        # already holds, so the row goes in the same transaction as `alice`.
+        # Pushing a *nested* app context here gets a different scoped session
+        # and the insert fails on the foreign key, because alice is not
+        # committed yet -- which is how this was written the first time.
+        issued = SessionService(session).begin(alice)
+        session.commit()
         test_client.set_cookie(SESSION_COOKIE, issued.token)
         if isinstance(test_client, SignedInClient):
             test_client.csrf_token = issued.csrf_token
