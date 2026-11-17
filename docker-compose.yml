@@ -12,13 +12,16 @@ name: file-explorer
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: fe-postgres
     environment:
       POSTGRES_USER: fileexplorer
       POSTGRES_PASSWORD: localdev
       POSTGRES_DB: file_explorer
-      # Deterministic collation so index ordering matches CI and production.
+      # Deterministic collation, so local index ordering matches CI. It does not
+      # match production: the managed database has its own cluster default, and
+      # what makes ordering stable there is migration 0002 pinning COLLATE "C"
+      # on the indexes themselves rather than relying on any cluster setting.
       POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
     ports:
       - "5432:5432"

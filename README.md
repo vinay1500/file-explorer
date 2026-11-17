@@ -111,7 +111,7 @@ cd file-explorer
 make help      # every available command
 ```
 
-**What works today:** `make help` lists the commands, and `make db` starts PostgreSQL 17 if
+**What works today:** `make help` lists the commands, and `make db` starts PostgreSQL 18 if
 you have Docker. *That path has not been exercised here* — development runs against the
 PostgreSQL service container in CI, so CI is where every command is actually proven.
 
@@ -120,10 +120,11 @@ are no application images, so those fail with a pointer rather than a confusing 
 This section gets updated as each one starts working — see the
 [change log](docs/book/CHANGELOG.md) for what landed when.
 
-**The tests do run**, in CI, against PostgreSQL 17 — never SQLite. Recursive CTEs,
-`SELECT … FOR NO KEY UPDATE` and partial unique indexes all behave differently there, so a suite
-that passes on SQLite has tested a different program. See
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml); the `tests` job is the one to read.
+**The tests do run**, in CI, against PostgreSQL 18 — the same major version the deployed
+database runs — and never SQLite. Recursive CTEs, `SELECT … FOR NO KEY UPDATE` and partial
+unique indexes all behave differently there, so a suite that passes on SQLite has tested a
+different program. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml); the `tests`
+job is the one to read.
 
 ---
 
