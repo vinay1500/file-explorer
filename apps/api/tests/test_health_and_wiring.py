@@ -354,6 +354,7 @@ ALLOWED_RULES = frozenset(
 )
 
 
+@pytest.mark.invariant
 def test_no_ddl_routes_registered(app: Flask) -> None:
     """The deployed service exposed `GET /create-tables`, which ran `create_all()`.
 
@@ -373,6 +374,7 @@ def test_no_ddl_routes_registered(app: Flask) -> None:
     assert not missing, f"the allowlist names routes that no longer exist: {sorted(missing)}"
 
 
+@pytest.mark.invariant
 def test_the_source_contains_no_schema_creation_calls() -> None:
     """`create_all` must not come back, by any route or none.
 

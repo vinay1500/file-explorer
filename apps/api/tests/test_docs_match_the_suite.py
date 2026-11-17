@@ -31,6 +31,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 TESTS = Path(__file__).resolve().parent
 DOCS = (ROOT / "docs" / "SECURITY.md", ROOT / "docs" / "ARCHITECTURE.md")
@@ -71,6 +73,7 @@ def _named(doc: Path) -> tuple[set[str], set[str]]:
     return claimed, planned
 
 
+@pytest.mark.invariant
 def test_every_test_named_in_the_documents_exists() -> None:
     """No document may name a test the suite does not define, unmarked.
 
@@ -94,6 +97,7 @@ def test_every_test_named_in_the_documents_exists() -> None:
     )
 
 
+@pytest.mark.invariant
 def test_nothing_marked_planned_has_already_arrived() -> None:
     """The marker has to be removed when the test lands.
 
@@ -114,6 +118,7 @@ def test_nothing_marked_planned_has_already_arrived() -> None:
     )
 
 
+@pytest.mark.invariant
 def test_the_guard_can_see_the_suite_it_is_guarding() -> None:
     """A guard that collects nothing would pass while proving nothing.
 
