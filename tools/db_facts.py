@@ -57,6 +57,15 @@ GENERIC = (
     re.compile(r"[a-z0-9-]+\.[a-z0-9-]+\.(?:aws|azure|gcp)\.neon\.tech", re.IGNORECASE),
 )
 
+# Measured 17 Nov 2026: the hostname has a compute-group label between the
+# endpoint and the region -- `ep-<endpoint>.c-3.ap-southeast-1.aws.neon.tech`.
+# Taking the second label printed `c-3` and called it a region. Match the shape
+# instead of trusting a position, and say "unknown" rather than guess.
+REGION = re.compile(r"^[a-z]{2,3}-[a-z]+-[0-9]+$")
+
+# `pg_database.datlocprovider` is a single char, and the output is for a human.
+PROVIDERS = {"c": "libc", "i": "icu", "b": "builtin"}
+
 QUERIES = (
     ("server version", "SELECT current_setting('server_version')"),
     ("version number", "SELECT current_setting('server_version_num')"),
@@ -128,7 +137,10 @@ def ask(url: str, options: str | None) -> list[tuple[str, str]]:
             for label, sql in QUERIES:
                 cur.execute(sql)
                 result = cur.fetchone()
-                rows.append((label, "none" if result is None else str(result[0])))
+                value = "none" if result is None else str(result[0])
+                if label == "collation provider":
+                    value = f"{value} ({PROVIDERS.get(value, 'unrecognised')})"
+                rows.append((label, value))
         return rows
 
 
@@ -141,8 +153,10 @@ def main() -> int:
     redact = build_redactor(url)
     parts = urlsplit(url)
     host = parts.hostname or ""
+    labels = host.split(".")
     print(f"endpoint kind     {'pooled (-pooler)' if '-pooler' in host else 'direct'}")
-    print(f"region            {host.split('.')[1] if host.count('.') > 1 else 'unknown'}")
+    print(f"region            {next((x for x in labels if REGION.match(x)), 'unknown')}")
+    print(f"provider          {'.'.join(labels[-3:]) if len(labels) >= 3 else 'unknown'}")
     print(f"query parameters  {parts.query or 'none'}")
     print()
 
@@ -175,6 +189,10 @@ def main() -> int:
     collation = dict(rows).get("datcollate", "")
     if collation in ("C", "C.UTF-8", "POSIX"):
         print(f"Q-5 ANSWERED: the cluster default is {collation}, which already is byte order.")
+        print("  So migration 0002's pinned indexes AGREE with the cluster default here;")
+        print("  they are not overriding it. What the pinning still buys is independence")
+        print("  from a future change of provider, locale or restore target -- not a")
+        print("  present mismatch. Do not describe production as untested on this.")
     else:
         print(f"Q-5 ANSWERED: the cluster default is {collation}, which is NOT byte order.")
         print("  Migration 0002's pinned indexes are the only thing making ordering stable,")
