@@ -37,19 +37,44 @@ GUEST_RETENTION = timedelta(hours=24)
 #: accident. The random part prevents collisions between guests.
 GUEST_EMAIL_DOMAIN = "guests.invalid"
 
-#: A tree with something to drag, something to drag it into, and enough depth to
-#: show a breadcrumb. Nine nodes: small enough to be free, interesting enough
-#: that the first thing a visitor does is move one.
-SEED: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
+#: A tree with something to drag, somewhere to drag it, and three levels so the
+#: breadcrumb endpoint has something to say. Nine nodes: small enough to be
+#: free, interesting enough that the first thing a visitor does is move one.
+#:
+#: Nested rather than two fixed levels, because the first version of this was
+#: parent-and-children and the depth it produced was 2 -- which makes
+#: `/nodes/{id}/path`, one of the six routes, return a breadcrumb of one entry.
+SEED: tuple[tuple[str, str, tuple], ...] = (
     (
         "Documents",
         "folder",
-        (("Invoice 2026-Q1.pdf", "file"), ("Invoice 2026-Q2.pdf", "file")),
+        (
+            ("Invoice 2026-Q1.pdf", "file", ()),
+            ("Invoice 2026-Q2.pdf", "file", ()),
+        ),
     ),
-    ("Contracts", "folder", (("Lease.pdf", "file"),)),
-    ("Photos", "folder", (("Holiday", "folder"),)),
+    ("Contracts", "folder", (("Lease.pdf", "file", ()),)),
+    (
+        "Photos",
+        "folder",
+        (("Holiday", "folder", (("Beach.jpg", "file", ()), ("Harbour.jpg", "file", ()))),),
+    ),
     ("Archive", "folder", ()),
 )
+
+def _count(nodes: tuple) -> int:
+    """How many rows `SEED` produces. Computed, not written down.
+
+    The comment above said "nine nodes" when the structure produced eight, CI
+    caught it, and the corrected version said nine when it produced ten. Twice
+    is enough: a number that has to agree with a nested literal should be
+    derived from the literal, and the test then asserts the database agrees
+    with *that* rather than with a third copy of the same arithmetic.
+    """
+    return sum(1 + _count(children) for _, _, children in nodes)
+
+
+SEED_NODE_COUNT = _count(SEED)
 
 
 def create_guest(db: DbSession | scoped_session[Any]) -> int:
@@ -70,19 +95,19 @@ def create_guest(db: DbSession | scoped_session[Any]) -> int:
     db.add(user)
     db.flush()
 
-    for name, node_type, children in SEED:
-        parent_id = db.execute(
-            text(
-                "INSERT INTO nodes (owner_id, parent_id, name, type) "
-                "VALUES (:o, NULL, :n, :t) RETURNING id"
-            ),
-            {"o": user.id, "n": name, "t": node_type},
-        ).scalar_one()
-        for child_name, child_type in children:
-            db.execute(
-                text("INSERT INTO nodes (owner_id, parent_id, name, type) VALUES (:o, :p, :n, :t)"),
-                {"o": user.id, "p": parent_id, "n": child_name, "t": child_type},
-            )
+    def insert(nodes: tuple, parent_id: int | None) -> None:
+        for name, node_type, children in nodes:
+            new_id = db.execute(
+                text(
+                    "INSERT INTO nodes (owner_id, parent_id, name, type) "
+                    "VALUES (:o, :p, :n, :t) RETURNING id"
+                ),
+                {"o": user.id, "p": parent_id, "n": name, "t": node_type},
+            ).scalar_one()
+            if children:
+                insert(children, int(new_id))
+
+    insert(SEED, None)
 
     return int(user.id)
 

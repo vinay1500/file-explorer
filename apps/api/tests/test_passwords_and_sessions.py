@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -45,8 +46,18 @@ def test_the_migrations_are_committed_not_just_run(session: OrmSession) -> None:
         ).scalar_one()
         assert exists, f"{table} does not exist: the migrations ran and were not committed"
 
+    # The newest migration on disk, rather than a number typed here. The first
+    # version pinned "0003" and went red the day 0004 was added, which is a
+    # guard objecting to the thing it was written to allow.
+    newest = max(
+        p.name.split("_")[0]
+        for p in (Path(__file__).resolve().parents[1] / "migrations" / "versions").glob("*.py")
+    )
     version = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    assert version == "0003", f"alembic_version says {version!r}, so a migration did not stick"
+    assert version == newest, (
+        f"alembic_version says {version!r} and the newest migration on disk is {newest!r}, "
+        "so a migration did not stick"
+    )
 
 
 # --- the hash itself ------------------------------------------------------

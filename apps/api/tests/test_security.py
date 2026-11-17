@@ -1031,8 +1031,20 @@ def test_a_guest_session_arrives_with_a_tree(anon: FlaskClient, session: OrmSess
     roots = anon.get("/api/v1/roots").get_json()
     assert [n["name"] for n in roots["items"]] == ["Archive", "Contracts", "Documents", "Photos"]
 
+    from file_explorer.services import guests
+
     total = session.execute(text("SELECT count(*) FROM nodes")).scalar_one()
-    assert total == 9, f"the seed produced {total} nodes"
+    assert total == guests.SEED_NODE_COUNT, f"the seed produced {total} nodes"
+    assert guests.SEED_NODE_COUNT >= 8, "the seed is too small to be worth showing"
+
+    # Three levels, so the breadcrumb endpoint has something to say. A two-level
+    # seed makes `/nodes/{id}/path` return one entry, which demonstrates
+    # nothing.
+    photos = next(n for n in roots["items"] if n["name"] == "Photos")
+    holiday = anon.get(f"/api/v1/nodes/{photos['id']}/children").get_json()["items"][0]
+    deepest = anon.get(f"/api/v1/nodes/{holiday['id']}/children").get_json()["items"][0]
+    crumbs = anon.get(f"/api/v1/nodes/{deepest['id']}/path").get_json()
+    assert [c["name"] for c in crumbs["path"]] == ["Photos", "Holiday", deepest["name"]]
 
 
 @pytest.mark.invariant
@@ -1098,7 +1110,8 @@ def test_abandoned_guests_are_collectable(session: OrmSession) -> None:
 
     fresh = guests.create_guest(session)
     session.commit()
-    assert session.execute(text("SELECT count(*) FROM nodes")).scalar_one() == 9
+    seeded = session.execute(text("SELECT count(*) FROM nodes")).scalar_one()
+    assert seeded == guests.SEED_NODE_COUNT
 
     assert guests.purge_guests(session) == 0, "a guest created now was collected"
 
