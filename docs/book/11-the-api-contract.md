@@ -238,4 +238,4 @@ of matching the body would close that.
 
 ---
 
-**Next:** [Chapter 12 · Identity and isolation](README.md) — written at M5.
+**Next:** [Chapter 12 · Identity and isolation](12-identity-and-isolation.md)
