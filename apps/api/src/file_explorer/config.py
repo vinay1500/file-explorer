@@ -80,6 +80,14 @@ class Config:
     # that produced D-22.
     AUTH_COOKIE_SAMESITE = os.environ.get("AUTH_COOKIE_SAMESITE", "Lax")
 
+    # The origin a browser actually addresses. Empty means "same origin as the
+    # page", which is what D-22's rewrite produces and what every environment
+    # except a split deployment should use.
+    #
+    # It exists so `create_app` can refuse a combination that cannot work.
+    # See `_assert_the_cookie_can_reach_us` in `app.py`.
+    PUBLIC_API_ORIGIN = os.environ.get("PUBLIC_API_ORIGIN", "")
+
     # A name is at most 255 characters, so a request body has no business being
     # large. Werkzeug raises 413 above this, before the body is read into
     # memory -- which is the point: without it, the limit is however much RAM

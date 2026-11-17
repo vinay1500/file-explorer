@@ -8,6 +8,7 @@ of connecting to a database.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit
 
 from flask import Flask, current_app
 from flask.wrappers import Response
@@ -77,6 +78,63 @@ def _retype_default_error(api: Api) -> None:
         )
 
 
+def _registrable_domain(origin: str) -> str:
+    """The part of a host that decides same-site, approximately.
+
+    Approximately, because exactly means the Public Suffix List and that is a
+    dependency and a data file that goes stale. The last two labels are right
+    for the hosts this deployment actually uses -- `vercel.app`,
+    `onrender.com` -- and the check below only ever has to answer "are these
+    two the same site", not "what site is this".
+    """
+    host = urlsplit(origin).hostname or ""
+    parts = [p for p in host.split(".") if p]
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def _assert_the_cookie_can_reach_us(app: Flask) -> None:
+    """Refuse to start on a cookie configuration that cannot work.
+
+    The failure this prevents is the worst-distributed one Gate 1 found. A
+    `SameSite=Lax` cookie is **refused at storage time** on a cross-site
+    response that is not a top-level navigation, so a browser on
+    `*.vercel.app` talking to `*.onrender.com` would log in, store nothing,
+    and 401 on the next request -- with no error anyone could read.
+
+    And it passes every test. Flask's test client does not enforce SameSite at
+    all, and `localhost:5173` to `localhost:5000` is cross-*origin* but
+    same-*site*, because SameSite compares the registrable domain and ignores
+    scheme and port. So local development, Compose and CI all behave and only
+    the deployed demo is broken.
+
+    Nothing in an HTTP test can catch that. A startup check can: the two
+    settings that contradict each other are both in the configuration, so the
+    contradiction is visible before a request is ever made.
+    """
+    origins = app.config.get("CORS_ALLOWED_ORIGINS") or []
+    api_origin = app.config.get("PUBLIC_API_ORIGIN") or ""
+    samesite = str(app.config.get("AUTH_COOKIE_SAMESITE", "Lax"))
+
+    if samesite.lower() == "none" or not origins or not api_origin:
+        # `None` carries its own risks and they are not this one. No configured
+        # frontend origin means D-22's same-origin rewrite, which is the
+        # intended shape and needs no check.
+        return
+
+    ours = _registrable_domain(api_origin)
+    cross = sorted({o for o in origins if _registrable_domain(o) != ours})
+    if cross:
+        raise RuntimeError(
+            f"AUTH_COOKIE_SAMESITE={samesite} cannot work with a frontend on a different site. "
+            f"PUBLIC_API_ORIGIN is {ours!r} and these are not: {cross}. A Lax or Strict cookie "
+            "is refused at storage time on a cross-site response, so sign-in would appear to "
+            "succeed and the next request would be 401. Either put the two behind one origin "
+            "(D-22: rewrite /api to the API service, which is the intended shape) or set "
+            "AUTH_COOKIE_SAMESITE=None and accept that third-party cookie blocking breaks it in "
+            "Safari regardless."
+        )
+
+
 def create_app(config_object: type[Config] | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config_object or Config)
@@ -129,6 +187,8 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
         app.wsgi_app = ProxyFix(  # type: ignore[method-assign]
             app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops
         )
+
+    _assert_the_cookie_can_reach_us(app)
 
     limiter.init_app(app)
 
