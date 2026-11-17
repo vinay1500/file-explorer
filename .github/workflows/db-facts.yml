@@ -1,0 +1,45 @@
+name: database facts
+
+# By hand only. This is the one workflow that reaches the deployed database, so
+# nothing is allowed to get there by accident -- not a push, not a pull request,
+# not a schedule. Run it from the Actions tab when a question needs the real
+# thing to answer it.
+#
+# It exists because two questions cannot be answered anywhere else:
+#
+#   Q-5  the cluster's default collation. Both CI service containers initdb with
+#        `--locale=C`, so the suite has never seen a database whose default is a
+#        real locale, and `docs/MUTATIONS.md` row 10 records what that costs.
+#   Q-6  whether the endpoint accepts the startup options the engine sends. The
+#        pooled endpoint is PgBouncer-shaped and may reject them.
+#
+# Every statement it runs is read-only, and every line it prints goes through a
+# redactor first -- workflow logs on a public repository are public, and a
+# failed connection would otherwise print the hostname that names the project.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  facts:
+    name: ask the deployed database about itself
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          # 3.11, matching the runtime the API is deployed on rather than the
+          # newest available, so a driver difference here is not a surprise there.
+          python-version: "3.11"
+
+      - name: Install the driver
+        run: pip install "psycopg[binary]>=3.2"
+
+      - name: Ask
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: python3 tools/db_facts.py

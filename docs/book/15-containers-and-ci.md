@@ -86,6 +86,17 @@ whether or not the indexes were ever pinned to a collation.
 That is why the collation guard reads `pg_index` instead of comparing sort
 orders. Confirmed by mutation — run 10 in [`docs/MUTATIONS.md`](../MUTATIONS.md).
 
+There is a sharper way to put it, which only became visible once the deployed
+database existed. A managed database has whatever cluster default the provider
+gives it, and no `POSTGRES_INITDB_ARGS` to override. So the configuration this
+suite has never run against is not some exotic edge case — **it is production.**
+Migration 0002's `COLLATE "C"` on the indexes is the only thing making ordering
+stable there, and the one place that pinning actually changes the answer is the
+one place nothing has ever tested it.
+
+A second service container with a real locale is the fix, and the honest note
+until it lands is that the pinning is argued for rather than demonstrated.
+
 ### Real PostgreSQL, never SQLite
 
 A service container, not an in-memory substitute. Recursive CTEs,
@@ -95,6 +106,24 @@ two connections that commit independently — which an in-memory database cannot
 give you at all.
 
 **A suite that passes on SQLite has tested a different program.**
+
+### And the same major version
+
+The image was pinned to `postgres:17-alpine` for four milestones. When the
+managed database was finally provisioned it came up on 18, because that is what
+a new project gets — so for about an hour the project tested against one major
+version and would have deployed against another.
+
+That is a smaller gap than SQLite-versus-PostgreSQL and the same kind of gap.
+Between majors, planner behaviour changes, defaults change, and locking and
+collation internals change. None of those *has* to break anything here, and
+arguing about which ones might is wasted effort when CI answers it in
+forty-five seconds for free: change the pin, push, read the result.
+
+It came back green — 201 tests, 99.78% branch coverage, the schema assertions
+intact, on 18.7. The useful part is not that it passed. It is that the question
+was settled by running it rather than by reasoning about release notes, and
+that the answer now holds for the version actually deployed.
 
 ---
 
@@ -156,6 +185,30 @@ run is the same defect class as a comment claiming a guarantee the code does
 not provide.
 
 ---
+
+## One workflow reaches the real database, and it has to be quiet about it
+
+Three questions cannot be answered by a service container, because they are
+questions *about the deployed database*: what its cluster default collation is,
+whether its endpoint accepts the startup options the engine sends, and whether
+it is reachable at all. `db-facts.yml` asks them. It is `workflow_dispatch`
+only — no push trigger, no schedule, no pull request — because nothing should
+reach production by accident, and every statement it runs is read-only.
+
+The interesting constraint is the log. **Workflow logs on a public repository
+are public**, and the failure mode of a connection test is an error message
+containing the host it could not reach — which is the one part of the URL that
+names the project. GitHub masks a secret's exact value in a log; it does not
+mask a substring of one, and the hostname is a substring.
+
+So every line goes through a redactor built from the parsed URL itself rather
+than from a guess, and it was checked against the error text libpq actually
+produces — including the form that prints the bare first host label with no
+domain attached, which a pattern matching the full hostname would have missed.
+
+It builds its connection from `engine_options()` rather than a copy of the
+options string, which is the same reasoning that made `engine_options` a
+function in the first place: a test of a copy is a test of the copy.
 
 ## The schedule, and why there is no keep-warm
 
