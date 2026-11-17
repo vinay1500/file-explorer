@@ -145,9 +145,27 @@ class SessionService:
         rather than a design.
         """
         at = now or datetime.now(UTC)
-        result = self._db.execute(
-            delete(Session).where(
-                (Session.expires_at <= at) | (Session.last_seen_at + IDLE_LIFETIME <= at)
-            )
-        )
-        return int(cast("CursorResult[Any]", result).rowcount or 0)
+
+        # Two statements rather than one `OR`, and two is the faster shape.
+        #
+        # `WHERE expires_at <= :at OR last_seen_at + interval <= :at` can use
+        # neither index: an `OR` across two columns forces a sequential scan
+        # unless the planner picks a bitmap union, and the second arm wraps the
+        # column in arithmetic, which makes it unusable by a plain btree
+        # regardless. The model's comment claimed this read `ix_sessions_expires_at`;
+        # it did not.
+        #
+        # Split, the first arm is a range scan on `ix_sessions_expires_at`. The
+        # second is still a scan -- the fix for that is an expression index,
+        # and it is not worth one for a sweeper nothing has scheduled yet, so
+        # the limitation is stated rather than hidden. Rewriting it as
+        # `last_seen_at <= :at - interval` would be index-usable and is the
+        # change to make if this ever runs often.
+        removed = 0
+        for condition in (
+            Session.expires_at <= at,
+            Session.last_seen_at <= at - IDLE_LIFETIME,
+        ):
+            result = self._db.execute(delete(Session).where(condition))
+            removed += int(cast("CursorResult[Any]", result).rowcount or 0)
+        return removed

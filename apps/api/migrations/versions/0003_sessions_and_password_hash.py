@@ -109,7 +109,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["users.id"],
-            name="fk_sessions_user_id_users",
+            # The convention is fk_%(table_name)s_%(column_0_name)s, and it
+            # ignores the name it is given -- so passing a hand-built one just
+            # means the model and the migration disagree about what the
+            # constraint is called, which matters the day somebody drops it.
+            name="user_id",
             ondelete="CASCADE",
         ),
         sa.CheckConstraint("expires_at > created_at", name="expiry_after_creation"),

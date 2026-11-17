@@ -216,12 +216,21 @@ def current_csrf_token() -> str:
     return str(token)
 
 
-def set_session_cookie(response: Response, token: str, *, secure: bool, samesite: str) -> None:
+def set_session_cookie(
+    response: Response, token: str, *, secure: bool, samesite: str, max_age: int
+) -> None:
     """Attach the session cookie.
 
     `httponly` is not configurable. A session cookie a script can read is the
     thing D-05 exists to avoid, and a setting for it is a setting someone turns
     off while debugging.
+
+    `max_age` is not optional either, and leaving it out was a real defect
+    rather than a default. Without it Werkzeug emits a **session cookie**,
+    discarded when the browser process ends -- while the login response says
+    `expires_at` fourteen days out. The row would live for a fortnight and the
+    credential for as long as the tab, so closing the browser signed you out
+    and the API went on holding a session nothing could present.
     """
     response.set_cookie(
         SESSION_COOKIE,
@@ -230,6 +239,7 @@ def set_session_cookie(response: Response, token: str, *, secure: bool, samesite
         secure=secure,
         samesite=samesite,
         path="/",
+        max_age=max_age,
     )
 
 

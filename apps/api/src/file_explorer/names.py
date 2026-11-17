@@ -167,4 +167,11 @@ def normalise_email(raw: str) -> str:
     mail providers, they change, and getting them wrong merges two people's
     accounts.
     """
-    return unicodedata.normalize("NFC", raw).strip().casefold()
+    folded = unicodedata.normalize("NFC", raw).strip().casefold()
+    if len(folded) > MAX_EMAIL_LENGTH:
+        # The schema bounds the *raw* value, and casefolding can make a string
+        # longer -- U+1E9E folds to "ss", so an address at the limit can cross
+        # it on the way to the column. Without this the overflow is a database
+        # error and a 500 on a request that validated cleanly.
+        raise InvalidName(f"Email addresses are at most {MAX_EMAIL_LENGTH} characters.")
+    return folded

@@ -168,7 +168,7 @@ def test_registration_normalises_the_address_before_storing_it(
 
 @pytest.mark.invariant
 def test_cookie_flags_set(
-    anon: FlaskClient, registered: Callable[..., int], session: OrmSession
+    app: Flask, anon: FlaskClient, registered: Callable[..., int], session: OrmSession
 ) -> None:
     """SECURITY §2.5. httpOnly is not configurable and must not become so."""
     registered("flags@example.com")
@@ -184,6 +184,12 @@ def test_cookie_flags_set(
     assert "HttpOnly" in cookie
     assert "SameSite=Lax" in cookie
     assert "Path=/" in cookie
+    # The one flag that is configurable was the one not asserted, which is the
+    # wrong way round: the others cannot be turned off by a deployment.
+    assert ("Secure" in cookie) is bool(app.config["AUTH_COOKIE_SECURE"])
+    # And the cookie must outlive the browser process. Without Max-Age it is a
+    # session cookie, discarded on close, while the body promises a fortnight.
+    assert "Max-Age=" in cookie
 
     body = response.get_json()
     assert "csrf_token" in body
@@ -228,10 +234,18 @@ def test_logout_revokes_the_row_not_just_the_cookie(
     logout rather than trusting that the client dropped it.
     """
     assert session.execute(text("SELECT count(*) FROM sessions")).scalar_one() == 1
+    token = client.get_cookie(SESSION_COOKIE)
+    assert token is not None
 
     assert client.post("/api/v1/auth/logout").status_code == 204
     assert session.execute(text("SELECT count(*) FROM sessions")).scalar_one() == 0
 
+    # Put the cookie back before asking again. `clear_session_cookie` sends a
+    # `Set-Cookie` with an expiry in the past, so the test client drops it and
+    # the next request carries nothing -- which would be a 401 whether or not
+    # the row had been deleted. The docstring claimed this used the same
+    # cookie afterwards; it did not, until now.
+    client.set_cookie(SESSION_COOKIE, token.value)
     assert client.get("/api/v1/roots").status_code == 401
 
 
@@ -580,11 +594,16 @@ def test_the_limit_counts_the_session_not_the_address(
 
 
 @pytest.mark.invariant
-def test_an_unauthenticated_caller_still_counts_against_something(app: Flask) -> None:
-    """There is no session on the way to getting one, so the key falls back.
+def test_the_rate_limit_key_falls_back_to_the_address(app: Flask) -> None:
+    """What the key *is*, not what the limiter does with it.
 
-    Recorded as a deliberate fallback rather than an oversight: the auth
-    endpoints are the one place the address is all there is, and the
+    Renamed. It was called `..._still_counts_against_something`, which is a
+    claim about rate-limit behaviour, and the body never issued a request --
+    so the name promised something only `test_a_failed_authentication_is_still_counted`
+    actually checks.
+
+    What this does assert is the fallback, and that it is deliberate: the auth
+    endpoints are the one place an address is all there is, because the
     alternative -- a per-account limit -- answers "does this person have an
     account" to anyone who asks.
     """

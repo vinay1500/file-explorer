@@ -132,9 +132,11 @@ class Session(Base):
         # Revoking every session for one user is a single-row-set delete, which
         # is what a password change has to do.
         Index("ix_sessions_user_id", "user_id"),
-        # The sweeper deletes by expiry, so it reads an index rather than the
-        # table. Also the only index a "how many sessions are live" question
-        # needs.
+        # The sweeper's first pass deletes by expiry and reads this as a range
+        # scan. Its second pass, on idleness, does not: it was written as one
+        # `OR` across two columns, which can use neither index, and the comment
+        # that used to be here claimed otherwise. The service now splits them
+        # and says which half is still a scan.
         Index("ix_sessions_expires_at", "expires_at"),
         CheckConstraint("expires_at > created_at", name="expiry_after_creation"),
         CheckConstraint("length(csrf_token) >= 16", name="csrf_long_enough"),
