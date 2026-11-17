@@ -149,6 +149,31 @@ def test_two_tokens_are_never_the_same() -> None:
     assert session_model.CSRF_BYTES == 32
 
 
+@pytest.mark.invariant
+def test_a_session_repr_carries_neither_secret() -> None:
+    """A repr ends up in a log, a traceback and a debugger, unasked.
+
+    The token hash is not a credential -- that is the point of storing a hash --
+    but a log full of them is a list of who was signed in and when, which is
+    more than a `__repr__` should decide to publish. The CSRF token is not a
+    credential on its own either, and belongs in a log even less.
+    """
+    token = session_model.new_token()
+    csrf = session_model.new_csrf_token()
+    row = session_model.Session(
+        token_hash=session_model.token_digest(token),
+        user_id=7,
+        csrf_token=csrf,
+        expires_at=datetime.now(UTC) + timedelta(days=1),
+    )
+
+    printed = repr(row)
+    assert printed == "<Session user_id=7>"
+    assert token not in printed
+    assert csrf not in printed
+    assert session_model.token_digest(token).hex() not in printed
+
+
 # --- what the database refuses --------------------------------------------
 
 
