@@ -112,8 +112,8 @@ def upgrade() -> None:
             name="fk_sessions_user_id_users",
             ondelete="CASCADE",
         ),
-        sa.CheckConstraint("expires_at > created_at", name="ck_sessions_expiry_after_creation"),
-        sa.CheckConstraint("length(csrf_token) >= 16", name="ck_sessions_csrf_long_enough"),
+        sa.CheckConstraint("expires_at > created_at", name="expiry_after_creation"),
+        sa.CheckConstraint("length(csrf_token) >= 16", name="csrf_long_enough"),
     )
     op.create_index("ix_sessions_user_id", "sessions", ["user_id"])
     op.create_index("ix_sessions_expires_at", "sessions", ["expires_at"])
@@ -122,21 +122,21 @@ def upgrade() -> None:
     # The prefix rather than `<> ''`: the defect was a value the library cannot
     # parse, and "not empty" does not describe that. See `models/user.py`.
     op.create_check_constraint(
-        "ck_users_password_hash_is_argon2id", "users", "password_hash LIKE '$argon2id$%'"
+        "password_hash_is_argon2id",
+        "users",
+        "password_hash LIKE '$argon2id$%'",
     )
-    op.create_check_constraint("ck_users_email_not_blank", "users", "email <> ''")
-    op.create_check_constraint(
-        "ck_users_email_trimmed", "users", "email = btrim(email, ' \\t\\n\\r')"
-    )
+    op.create_check_constraint("email_not_blank", "users", "email <> ''")
+    op.create_check_constraint("email_trimmed", "users", "email = btrim(email, ' \\t\\n\\r')")
 
 
 def downgrade() -> None:
     # Reversible, and the default comes back with it. A downgrade that left the
     # constraint in place would make the schema un-seedable by anything written
     # against the old shape, which is the whole point of being able to go back.
-    op.drop_constraint("ck_users_email_trimmed", "users", type_="check")
-    op.drop_constraint("ck_users_email_not_blank", "users", type_="check")
-    op.drop_constraint("ck_users_password_hash_is_argon2id", "users", type_="check")
+    op.drop_constraint("email_trimmed", "users", type_="check")
+    op.drop_constraint("email_not_blank", "users", type_="check")
+    op.drop_constraint("password_hash_is_argon2id", "users", type_="check")
     op.alter_column("users", "password_hash", server_default="")
 
     op.drop_index("ix_sessions_expires_at", table_name="sessions")

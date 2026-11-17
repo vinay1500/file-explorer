@@ -188,14 +188,16 @@ jobs:
         run: |
           # Each guard is tested by trying to violate it. A constraint that
           # exists but does not fire is worse than none, because it is trusted.
+          # Defined before the first use, which it was not: the insert below ran
+          # with $H unset and wrote an empty hash. Single quotes because an
+          # argon2id hash is full of `$` and every statement here is
+          # inside a double-quoted argument.
+          H='$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$Qx6sB0nMOSSz0CqN8nUfsFYQkOaJ5cPGNSDJBzqfKPo'
+
           psql -v ON_ERROR_STOP=1 -c "
             INSERT INTO users (id, email, password_hash) VALUES (1, 'a@example.com', '$H');
             INSERT INTO nodes (id, owner_id, parent_id, name, type)
               VALUES (1, 1, NULL, 'docs', 'folder');" >/dev/null
-
-          # Single quotes: an argon2id encoded hash is full of `$` and every
-          # statement below is inside a double-quoted argument.
-          H='$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$Qx6sB0nMOSSz0CqN8nUfsFYQkOaJ5cPGNSDJBzqfKPo'
 
           fail() { echo "::error::$1"; exit 1; }
 

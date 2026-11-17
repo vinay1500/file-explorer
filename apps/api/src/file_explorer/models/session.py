@@ -136,8 +136,8 @@ class Session(Base):
         # table. Also the only index a "how many sessions are live" question
         # needs.
         Index("ix_sessions_expires_at", "expires_at"),
-        CheckConstraint("expires_at > created_at", name="ck_sessions_expiry_after_creation"),
-        CheckConstraint("length(csrf_token) >= 16", name="ck_sessions_csrf_long_enough"),
+        CheckConstraint("expires_at > created_at", name="expiry_after_creation"),
+        CheckConstraint("length(csrf_token) >= 16", name="csrf_long_enough"),
     )
 
     def __repr__(self) -> str:

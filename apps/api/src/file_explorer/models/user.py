@@ -76,11 +76,9 @@ class User(Base):
         # This deliberately couples the column to argon2id. Moving to another
         # scheme should require a migration that says so, rather than two
         # formats quietly coexisting while one of them stops verifying.
-        CheckConstraint(
-            "password_hash LIKE '$argon2id$%'", name="ck_users_password_hash_is_argon2id"
-        ),
-        CheckConstraint("email = btrim(email, ' \t\n\r')", name="ck_users_email_trimmed"),
-        CheckConstraint("email <> ''", name="ck_users_email_not_blank"),
+        CheckConstraint("password_hash LIKE '$argon2id$%'", name="password_hash_is_argon2id"),
+        CheckConstraint("email = btrim(email, ' \t\n\r')", name="email_trimmed"),
+        CheckConstraint("email <> ''", name="email_not_blank"),
     )
 
     def __repr__(self) -> str:
