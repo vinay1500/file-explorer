@@ -51,7 +51,7 @@ trash/restore, search, real-time collaboration.
 | Rate limiting | none ✅ | **Flask-Limiter** | Auth endpoints only |
 | Logging | Flask default ✅ | **structlog**, JSON, request-id bound | |
 | DB driver | psycopg2-binary 2.9.10 ✅ | **psycopg 3** | What a bare `postgresql://` resolves to in SQLAlchemy 2.x; `PyMySQL` removed |
-| Database | PostgreSQL ✅ | PostgreSQL 17 | Recursive CTEs, partial unique indexes |
+| Database | PostgreSQL ✅ | PostgreSQL 18 | Recursive CTEs, partial unique indexes. Managed by Neon in Singapore; CI pins the same major version |
 | WSGI | gunicorn 23.0.0 ✅ | gunicorn | |
 | API tests | none ✅ | **pytest** + pytest-cov against real PostgreSQL | |
 | Lint / format | eslint-config-react-app ✅ | **Ruff** (api), **ESLint 9 + Prettier** (web) | |
