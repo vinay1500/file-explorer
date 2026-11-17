@@ -271,11 +271,21 @@ implementation that reuses the rows its locking select returned.
 | `PATCH` | `/api/v1/nodes/{id}` | Rename only |
 | `DELETE` | `/api/v1/nodes/{id}` | Cascades to the subtree |
 | `POST` | `/api/v1/nodes/{id}/move` | `{ "new_parent_id": int \| null }` |
-| `GET` | `/api/v1/nodes/{id}/subtree?depth=` | Server-side traversal, depth-capped |
 | `GET` | `/api/v1/nodes/{id}/path` | Breadcrumbs, single ancestry query |
+| `GET` | `/api/v1/nodes/{id}/children?cursor=&limit=` | One level under a node, paginated |
+| `GET` | `/api/v1/roots?cursor=&limit=` | The caller's roots, paginated |
 
 Move is a `POST` to a sub-resource rather than a field on `PATCH`, because it is an operation
 with its own preconditions and its own failure mode, not a property assignment.
+
+**Withdrawn 17 Nov: `GET /nodes/{id}/subtree?depth=`.** This table listed it and
+`docs/SECURITY.md` named a test for it; neither the endpoint nor the service method was ever
+built, and `test_the_document_declares_every_route` asserts the published document declares
+exactly six paths. The two routes that *were* built and were missing from this table are now in
+it. Nothing needs a whole subtree in one response: the client walks one level at a time through
+`/children`, which is paginated and bounded, and `/path` answers the only question a whole-subtree
+read was for. If it is ever wanted it belongs in §12 as an open question, not here as if it
+existed.
 
 `new_parent_id: null` moves a node to the root. This is a legal destination and is the fix for
 the current frontend bug where items can never be dragged back out of a folder.
@@ -306,7 +316,7 @@ file-explorer/
 │   │   │   ├── test_tree_invariants.py
 │   │   │   ├── test_concurrency.py
 │   │   │   ├── test_api_contract.py
-│   │   │   └── test_security.py
+│   │   │   └── test_security.py          (planned, M5.4)
 │   │   ├── Dockerfile
 │   │   ├── pyproject.toml
 │   │   └── .env.example
