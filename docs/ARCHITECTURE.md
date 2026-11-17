@@ -38,7 +38,7 @@ trash/restore, search, real-time collaboration.
 | Web language | JavaScript ✅ | **TypeScript 5** | API types generated from OpenAPI |
 | Server state | React Context ✅ | **TanStack Query v5** | Optimistic updates with rollback |
 | HTTP client | axios 1.8.4 ✅ | fetch wrapper, typed | Drops a dependency |
-| Tree / drag-drop | react-dnd 16 + @minoru/react-dnd-treeview 3.5 ✅ | Same | Works; `canDrop` to be fixed |
+| Tree / drag-drop | react-dnd 16 + @minoru/react-dnd-treeview 3.5 ✅ | Same | `canDrop` **disables** the library's descendant check rather than adding to it — settled from source, 18 Nov |
 | Styling | Inline style objects + two CSS files ✅ | CSS custom properties + CSS Modules | See DESIGN-SYSTEM.md |
 | Web tests | one failing CRA default ✅ | **Vitest + Testing Library + Playwright** | |
 | API language | Python 3.12 ✅ | Python 3.12 | Kept |
@@ -422,9 +422,13 @@ context and consequences.
 
 ## 12. Open questions
 
-- Does the `@minoru/react-dnd-treeview` built-in descendant check survive a custom `canDrop`?
-  Needs a runtime test before the frontend guard is written. Until answered, the server check
-  is the only one assumed to exist.
+- ~~Does the `@minoru/react-dnd-treeview` built-in descendant check survive a custom
+  `canDrop`?~~ **Answered 18 November, from source rather than at runtime.** A custom `canDrop`
+  that returns anything other than `undefined` **replaces** the built-in check; only `undefined`
+  falls through. Read from the compiled bundle of the version `package-lock.json` pins and
+  cross-read against that tag's source. The callback in `apps/web` returns `target?.droppable`,
+  true for every folder — so the client has actively permitted the cycle drag since April 2025.
+  See book chapter 5.
 - Soft delete with a restore window, or hard delete? Currently hard delete. Soft delete would
   complicate every uniqueness constraint and is out of scope unless a reason appears.
 - Is 64 a sensible depth cap? Chosen to be far above real use and far below any recursion limit.

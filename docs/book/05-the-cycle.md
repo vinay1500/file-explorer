@@ -69,10 +69,35 @@ Providing a custom `canDrop` that returns a non-undefined value replaces the lib
 behaviour rather than adding to it. So the server had no check worth the name, and the client
 had just disabled the one it was given.
 
-> **Still unverified.** That describes the library's documented behaviour; it has not been
-> demonstrated against this code. It is resolved at M6 by running the drag and watching. Until
-> then the server check is treated as the only one that exists — which is the correct posture
-> regardless, because a client guard is a convenience and never a control.
+> **Settled on 18 November, from source, and it is worse than "unverified" suggested.**
+>
+> The claim above was the library's *documented* behaviour, and documentation is not evidence.
+> M6's Gate 1 read the compiled bundle of the exact version `package-lock.json` pins —
+> `@minoru/react-dnd-treeview@3.5.0` — and cross-read it against that tag's source. All three
+> agree:
+>
+> ```js
+> if (canDrop) {
+>     var result = canDrop(dragSourceId, dropTargetId);
+>     if (result !== undefined) {
+>         return result;                                 // every check below is skipped
+>     }
+> }
+> ...
+> return !isAncestor(tree, dragSourceId, dropTargetId);  // the descendant check
+> ```
+>
+> So a custom `canDrop` **replaces** the built-in check. Only `undefined` falls through to it.
+>
+> And the callback on disk returns `target?.droppable`, which is `true` for every folder. So the
+> client does not merely fail to add a guard — **it actively permits a folder being dragged into
+> its own descendant**, and has since April 2025. The posture the paragraph above recommends,
+> treating the server as the only guard, was correct for a reason stronger than the one given.
+>
+> It spent five days as an open question that could have been answered in twenty minutes by
+> reading a file in `node_modules`. The lesson is not about this library: **"needs a runtime
+> test" was an assumption about how to answer it, and it was wrong.** The runtime test is still
+> worth running at M6.5 as end-to-end confirmation, but it is no longer what the answer waits on.
 
 ## The fix
 
