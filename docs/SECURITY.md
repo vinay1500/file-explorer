@@ -103,9 +103,16 @@ cross-site request vector.
 
 - JWT in an httpOnly, Secure, SameSite=Lax cookie. Not localStorage — localStorage is readable
   by any script that gets onto the page, so a single XSS becomes full account takeover.
-- Because the credential is a cookie, CSRF protection is mandatory: a double-submit token
-  required on every mutating request, compared against the cookie.
-- Short access-token lifetime with refresh; logout clears the cookie server-side.
+- Because the credential is a cookie, CSRF protection is mandatory: a **synchronizer token**,
+  required on every mutating request and compared against the value stored in the session row.
+  *Not* a double-submit token compared against a cookie, which this bullet used to specify —
+  that only ever compares the request to itself, so anyone who can set a cookie for the site
+  satisfies it. Being stateful is what makes the bound version free: the row is already being
+  read to authenticate.
+- A session lasts 14 days from creation and 12 hours from last use, whichever comes first.
+  **There is no refresh token and no refresh route** — this bullet specified one before D-21
+  replaced the JWT with a row, and a row makes refresh unnecessary: the session is extended by
+  using it. Logout **deletes the row**, which is what a stateless token could not do.
 - Tests: `test_mutation_without_csrf_token_rejected`, `test_cookie_flags_set`,
   `test_another_sessions_csrf_token_does_not_work` -- which is the one that separates a
   synchronizer token from a double-submit one, because it refuses a real, live,
@@ -114,7 +121,11 @@ cross-site request vector.
 ### 2.6 Authentication endpoints
 
 - Passwords hashed with argon2id. No plaintext, no reversible encoding, never logged.
-- Rate limiting on register, login and refresh, by IP and by account.
+- Rate limiting on register and login, **by address only**. Not by account, deliberately:
+  "this address is rate limited" and "this address is not" is a working answer to *does this
+  person have an account*, available to anyone without a session — the oracle this very section
+  exists to close, reopened through the side door. The trade is written out in
+  `blueprints/auth.py` where the limit is declared.
 - Login returns the same response and the same timing class for an unknown email and a wrong
   password. No user enumeration.
 - Tests: `test_login_does_not_enumerate_users`, and
@@ -136,7 +147,8 @@ The structure itself is the resource an attacker can abuse.
 - Tests: `test_a_chain_may_reach_the_cap_but_not_pass_it`, `test_depth_counts_subtree_height`.
   *The second bullet above described depth-limited subtree reads and named a test for them.
   There is no subtree endpoint: the service has no such method and
-  `test_the_document_declares_every_route` asserts exactly six paths. The bullet now says what is
+  `test_the_document_declares_every_route` asserts the exact route list, which was six when this
+  was written and is ten since M5 added the session routes. The bullet now says what is
   true — every read is bounded — rather than naming an endpoint that does not exist.*
 
 ### 2.8 Schema and administrative endpoints

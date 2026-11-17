@@ -281,7 +281,8 @@ with its own preconditions and its own failure mode, not a property assignment.
 **Withdrawn 17 Nov: `GET /nodes/{id}/subtree?depth=`.** This table listed it and
 `docs/SECURITY.md` named a test for it; neither the endpoint nor the service method was ever
 built, and `test_the_document_declares_every_route` asserts the published document declares
-exactly six paths. The two routes that *were* built and were missing from this table are now in
+the exact route list — six when this was written, ten since M5. The two routes that *were* built
+and were missing from this table are now in
 it. Nothing needs a whole subtree in one response: the client walks one level at a time through
 `/children`, which is paginated and bounded, and `/path` answers the only question a whole-subtree
 read was for. If it is ever wanted it belongs in §12 as an open question, not here as if it

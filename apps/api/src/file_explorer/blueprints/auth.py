@@ -29,6 +29,7 @@ not "timing cannot leak".
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 from flask import Response, current_app, jsonify, make_response, request
@@ -175,7 +176,10 @@ class Login(MethodView):
             {"csrf_token": issued.csrf_token, "expires_at": issued.expires_at}
         )
         response = make_response(jsonify(payload), 200)
-        auth.set_session_cookie(response, issued.token, **_cookie_settings())
+        # The cookie's lifetime is the row's lifetime, computed from the same
+        # expiry rather than from a second constant that could drift from it.
+        max_age = max(1, int((issued.expires_at - datetime.now(UTC)).total_seconds()))
+        auth.set_session_cookie(response, issued.token, max_age=max_age, **_cookie_settings())
         return response
 
 
