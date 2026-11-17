@@ -8,6 +8,7 @@ of connecting to a database.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit
 
 from flask import Flask, current_app
 from flask.wrappers import Response
@@ -77,6 +78,63 @@ def _retype_default_error(api: Api) -> None:
         )
 
 
+def _registrable_domain(origin: str) -> str:
+    """The part of a host that decides same-site, approximately.
+
+    Approximately, because exactly means the Public Suffix List and that is a
+    dependency and a data file that goes stale. The last two labels are right
+    for the hosts this deployment actually uses -- `vercel.app`,
+    `onrender.com` -- and the check below only ever has to answer "are these
+    two the same site", not "what site is this".
+    """
+    host = urlsplit(origin).hostname or ""
+    parts = [p for p in host.split(".") if p]
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def _assert_the_cookie_can_reach_us(app: Flask) -> None:
+    """Refuse to start on a cookie configuration that cannot work.
+
+    The failure this prevents is the worst-distributed one Gate 1 found. A
+    `SameSite=Lax` cookie is **refused at storage time** on a cross-site
+    response that is not a top-level navigation, so a browser on
+    `*.vercel.app` talking to `*.onrender.com` would log in, store nothing,
+    and 401 on the next request -- with no error anyone could read.
+
+    And it passes every test. Flask's test client does not enforce SameSite at
+    all, and `localhost:5173` to `localhost:5000` is cross-*origin* but
+    same-*site*, because SameSite compares the registrable domain and ignores
+    scheme and port. So local development, Compose and CI all behave and only
+    the deployed demo is broken.
+
+    Nothing in an HTTP test can catch that. A startup check can: the two
+    settings that contradict each other are both in the configuration, so the
+    contradiction is visible before a request is ever made.
+    """
+    origins = app.config.get("CORS_ALLOWED_ORIGINS") or []
+    api_origin = app.config.get("PUBLIC_API_ORIGIN") or ""
+    samesite = str(app.config.get("AUTH_COOKIE_SAMESITE", "Lax"))
+
+    if samesite.lower() == "none" or not origins or not api_origin:
+        # `None` carries its own risks and they are not this one. No configured
+        # frontend origin means D-22's same-origin rewrite, which is the
+        # intended shape and needs no check.
+        return
+
+    ours = _registrable_domain(api_origin)
+    cross = sorted({o for o in origins if _registrable_domain(o) != ours})
+    if cross:
+        raise RuntimeError(
+            f"AUTH_COOKIE_SAMESITE={samesite} cannot work with a frontend on a different site. "
+            f"PUBLIC_API_ORIGIN is {ours!r} and these are not: {cross}. A Lax or Strict cookie "
+            "is refused at storage time on a cross-site response, so sign-in would appear to "
+            "succeed and the next request would be 401. Either put the two behind one origin "
+            "(D-22: rewrite /api to the API service, which is the intended shape) or set "
+            "AUTH_COOKIE_SAMESITE=None and accept that third-party cookie blocking breaks it in "
+            "Safari regardless."
+        )
+
+
 def create_app(config_object: type[Config] | None = None) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config_object or Config)
@@ -130,6 +188,27 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
             app.wsgi_app, x_for=hops, x_proto=hops, x_host=hops
         )
 
+    _assert_the_cookie_can_reach_us(app)
+
+    # **Before `limiter.init_app`, and that is load-bearing.** Flask runs
+    # `before_request` functions in registration order, and Flask-Limiter adds
+    # its own during `init_app` -- so a hook registered afterwards runs *after*
+    # the limiter has already asked `rate_limit_key()` who the caller is. The
+    # key was then the address for every request, including authenticated ones,
+    # and the fix for keying on the session silently did nothing.
+    #
+    # This is the same trap as the `Retry-After` strip twenty lines up, in the
+    # opposite direction: that one needed to be registered *first* so it would
+    # run *last*, because `after_request` runs in reverse. Both were found by a
+    # test that drove the real behaviour rather than by reading the code.
+    #
+    # The cost of authenticating before rate limiting is one indexed
+    # primary-key read ahead of a limit that might refuse the request. Bounded,
+    # and it is not paid by a flood: with no cookie `resolve` returns before it
+    # queries anything, so an unauthenticated burst does no database work at
+    # all.
+    auth_module.register(app)
+
     limiter.init_app(app)
 
     # `ERROR_SCHEMA` registers the Problem component itself, so registering it
@@ -142,11 +221,11 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     api.register_blueprint(auth_blp)
     api.register_blueprint(nodes_blp)
 
-    # **After the blueprints.** `before_request` functions run in registration
-    # order, and this one resolves the session every route depends on, so it
-    # would be equally correct earlier -- but registering it here keeps the
-    # reading order honest: routes exist, then the thing that guards them.
-    auth_module.register(app)
+    # (`auth_module.register` is above, before `limiter.init_app`. The comment
+    # that used to be here said the position was a matter of reading order. It
+    # is not: the limiter asks who the caller is in its own `before_request`,
+    # so this one has to be registered first or the answer is always the
+    # address.)
 
     # After the blueprint: smorest registers its shared error response while
     # wiring routes, so doing this at Api() time finds nothing.

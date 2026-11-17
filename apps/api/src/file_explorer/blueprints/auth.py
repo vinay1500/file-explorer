@@ -35,6 +35,7 @@ from flask import Response, current_app, jsonify, make_response, request
 from flask.views import MethodView
 from flask_smorest import Blueprint
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from file_explorer import auth, passwords
 from file_explorer.extensions import db, limiter
@@ -65,6 +66,25 @@ _DUMMY_HASH = passwords.hash_password("dummy password, never a real credential")
 
 # Tighter than the global default, and per route. Credential endpoints are the
 # ones worth spending a limit on.
+#
+# **Keyed on the address, and that is the uncomfortable part.** Everywhere else
+# the limiter keys on the session, which is one person and cannot be minted
+# again without signing in. Here there is no session yet -- getting one is the
+# whole request -- so the key falls back to the address, and an address is both
+# shared and chosen.
+#
+# The alternative is a per-account limit, and it is worse: "this address is
+# rate limited" and "this address is not" is a working answer to *does this
+# person have an account*, available to anyone, without a session. That is the
+# oracle §2.6 exists to close, reopened through the side door. Gate 1 raised
+# both directions and this is the trade taken: a shared bucket that can be
+# exhausted for a whole network, over an enumeration oracle that works for
+# everyone forever.
+#
+# What makes it tolerable rather than merely chosen: argon2id at 19 MiB makes
+# each attempt expensive for the server, so the limit exists to protect the
+# instance, not to be the only thing standing between an attacker and an
+# account. The password length floor does that.
 AUTH_RATE_LIMIT = "10 per minute"
 
 
@@ -98,7 +118,18 @@ class Register(MethodView):
         ).scalar_one_or_none()
         if existing is None:
             db.session.add(User(email=email, password_hash=encoded))
-            db.session.commit()
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # Two requests for the same address raced past the check above
+                # and the unique index settled it. Without this the loser is an
+                # unhandled 500 -- which is both a crash and an oracle, because
+                # a 500 here means "somebody else just registered this".
+                #
+                # The answer is the same 202 either way, which is the point:
+                # the race is invisible to both callers, and exactly one
+                # account exists afterwards.
+                db.session.rollback()
 
         return {"accepted": True}
 

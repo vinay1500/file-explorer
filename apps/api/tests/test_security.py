@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
 import pytest
 from flask import Flask
@@ -455,3 +456,154 @@ def test_a_weaker_stored_hash_is_upgraded_on_a_successful_login(
     stored = session.execute(text("SELECT password_hash FROM users")).scalar_one()
     assert stored != weak, "a weaker hash survived a successful login"
     assert f"m={passwords.MEMORY_COST_KIB}" in stored
+
+
+# --- the cookie has to be able to reach us --------------------------------
+
+
+@pytest.mark.invariant
+def test_cookie_samesite_and_allowed_origins_cannot_disagree() -> None:
+    """A startup check, because no HTTP test can catch this one.
+
+    `SameSite=Lax` is refused at storage time on a cross-site response that is
+    not a top-level navigation. A browser on one registrable domain talking to
+    an API on another would log in, store nothing, and 401 on the next request
+    with no error anyone could read.
+
+    And it would pass everything: Flask's test client does not enforce SameSite
+    at all, and `localhost:5173` to `localhost:5000` is cross-*origin* but
+    same-*site*, because SameSite compares the registrable domain and ignores
+    scheme and port. Local development, Compose and CI would all behave and
+    only the deployed demo would be broken, which is the worst place for a
+    failure to hide.
+
+    The two settings that contradict each other are both configuration, so the
+    contradiction is visible before any request exists. `create_app` refuses.
+    """
+    from file_explorer.app import create_app
+    from file_explorer.config import Config
+
+    class Split(Config):
+        PUBLIC_API_ORIGIN = "https://file-explorer-backend.onrender.com"
+        CORS_ALLOWED_ORIGINS: ClassVar[list[str]] = ["https://file-explorer.vercel.app"]
+        AUTH_COOKIE_SAMESITE = "Lax"
+
+    with pytest.raises(RuntimeError, match="cannot work with a frontend on a different site"):
+        create_app(Split)
+
+    class SameSite(Split):
+        CORS_ALLOWED_ORIGINS: ClassVar[list[str]] = ["https://app.onrender.com"]
+
+    create_app(SameSite)
+
+    class Relaxed(Split):
+        AUTH_COOKIE_SAMESITE = "None"
+
+    create_app(Relaxed)
+
+
+@pytest.mark.invariant
+def test_the_default_configuration_is_same_origin_and_needs_no_check() -> None:
+    """D-22's shape: no configured frontend origin, because there is no cross-origin traffic."""
+    from file_explorer.app import create_app
+    from file_explorer.config import Config
+
+    assert Config.PUBLIC_API_ORIGIN == ""
+    assert Config.CORS_ALLOWED_ORIGINS == []
+    create_app(Config)
+
+
+# --- the rate limit counts the right person -------------------------------
+
+
+@pytest.mark.invariant
+def test_the_limit_counts_the_session_not_the_address(
+    app: Flask, session: OrmSession, alice: int, bob: int
+) -> None:
+    """Two users behind one address are two buckets.
+
+    Keying on the address was the M3b placeholder and Gate 1 called it out in
+    both directions. An address is **shared** -- everyone behind one NAT is one
+    bucket, so a busy network turns the limit into an outage switch for
+    everybody on it. And it is **chosen** -- behind a proxy that forwards one,
+    a caller who wants more than their share sets a different value.
+
+    Every test client here comes from the same address, so if the key were the
+    address this could not pass -- and it did not, the first time. Flask-Limiter
+    registers its own `before_request` during `init_app`, and `authenticate` was
+    registered after it, so the limiter asked who the caller was before anything
+    had decided. The key was the address for every request and the change to
+    key on the session did nothing at all.
+
+    Same trap as the `Retry-After` strip, in the opposite direction: that one
+    had to be registered first so it would run last, because `after_request`
+    runs in reverse. Both were caught by a test that drove the real behaviour.
+    """
+    from file_explorer.extensions import limiter
+
+    limit = int(app.config["RATELIMIT_DEFAULT"].split()[0])
+
+    def client_for(user_id: int) -> FlaskClient:
+        issued = SessionService(session).begin(user_id)
+        session.commit()
+        c = app.test_client()
+        c.set_cookie(SESSION_COOKIE, issued.token)
+        return c
+
+    limiter.reset()
+    try:
+        as_alice, as_bob = client_for(alice), client_for(bob)
+        spent = [as_alice.get("/api/v1/roots") for _ in range(limit + 2)]
+        assert any(r.status_code == 429 for r in spent), "alice never hit her own limit"
+
+        # Same address, different session. If the key were the address this
+        # would already be exhausted.
+        assert as_bob.get("/api/v1/roots").status_code == 200
+    finally:
+        limiter.reset()
+
+
+@pytest.mark.invariant
+def test_an_unauthenticated_caller_still_counts_against_something(app: Flask) -> None:
+    """There is no session on the way to getting one, so the key falls back.
+
+    Recorded as a deliberate fallback rather than an oversight: the auth
+    endpoints are the one place the address is all there is, and the
+    alternative -- a per-account limit -- answers "does this person have an
+    account" to anyone who asks.
+    """
+    from file_explorer.extensions import rate_limit_key
+
+    with app.test_request_context("/api/v1/auth/login"):
+        key = rate_limit_key()
+    assert key.startswith("addr:"), key
+
+    with app.test_request_context("/api/v1/roots"):
+        from flask import g
+
+        g.actor_id = 42
+        assert rate_limit_key() == "user:42"
+
+
+@pytest.mark.invariant
+def test_two_registrations_of_one_address_race_to_the_same_answer(
+    anon: FlaskClient, session: OrmSession
+) -> None:
+    """The check-then-insert has a window, and the index is what closes it.
+
+    Without handling the violation the loser is an unhandled 500 -- which is
+    both a crash and an oracle, because a 500 here means "somebody else just
+    registered this". Simulated by inserting the row between the two calls,
+    which is the same interleaving without needing two connections.
+    """
+    body = {"email": "race@example.com", "password": PASSWORD}
+    assert anon.post("/api/v1/auth/register", json=body).status_code == 202
+
+    # The row now exists; the second call takes the "already taken" path.
+    second = anon.post("/api/v1/auth/register", json=body)
+    assert second.status_code == 202
+
+    count = session.execute(
+        text("SELECT count(*) FROM users WHERE email = 'race@example.com'")
+    ).scalar_one()
+    assert count == 1
