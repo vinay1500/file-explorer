@@ -92,6 +92,41 @@ def _registrable_domain(origin: str) -> str:
     return ".".join(parts[-2:]) if len(parts) >= 2 else host
 
 
+def _assert_the_limiter_can_tell_callers_apart(app: Flask) -> None:
+    """Refuse to start when a proxy is declared and no hop count is.
+
+    The rate limiter keys authenticated requests on the session, which is one
+    person. The credential routes have no session yet, so they key on
+    `request.remote_addr` -- and behind a proxy, with `TRUST_PROXY_HOPS = 0`,
+    that is the *proxy's* address for every caller on earth. Ten login attempts
+    a minute, shared globally, so one script makes sign-in return 429 for
+    everybody, indefinitely, at negligible cost.
+
+    D-22's rewrite puts a proxy in front of this API unconditionally, so the
+    combination is the default shape rather than an exotic one.
+
+    Nothing at the HTTP level can catch it: under the test client
+    `remote_addr` is the real caller, so every test passes while describing a
+    world the deployment is not in. Same class as
+    `_assert_the_cookie_can_reach_us`, and the same remedy -- the two settings
+    that contradict each other are both configuration.
+
+    The hop count is deliberately not defaulted to 1. Trusting one hop too many
+    lets a caller set their own `X-Forwarded-For` and choose their own bucket,
+    which is the opposite failure and a worse one. The number has to be read
+    off a real request through the real stack.
+    """
+    if app.config.get("BEHIND_PROXY") and not app.config.get("TRUST_PROXY_HOPS"):
+        raise RuntimeError(
+            "BEHIND_PROXY=1 with TRUST_PROXY_HOPS=0. The rate limiter would key every "
+            "unauthenticated caller on the proxy's address, so the whole internet would share "
+            "one login bucket and a single script could lock everybody out. Measure the real "
+            "hop count by reading X-Forwarded-For from a request through the deployed stack and "
+            "set TRUST_PROXY_HOPS to it. Do not guess high: one hop too many lets a caller "
+            "choose their own key."
+        )
+
+
 def _assert_the_cookie_can_reach_us(app: Flask) -> None:
     """Refuse to start on a cookie configuration that cannot work.
 
@@ -115,10 +150,21 @@ def _assert_the_cookie_can_reach_us(app: Flask) -> None:
     api_origin = app.config.get("PUBLIC_API_ORIGIN") or ""
     samesite = str(app.config.get("AUTH_COOKIE_SAMESITE", "Lax"))
 
+    # `SameSite=None` without `Secure` is refused at storage time by every
+    # current browser -- the same class of failure as the cross-site `Lax` case
+    # below, and the easier one to reach, because turning `Secure` off is what
+    # somebody does to make a thing work over plain HTTP.
+    if samesite.lower() == "none" and not app.config.get("AUTH_COOKIE_SECURE", True):
+        raise RuntimeError(
+            "AUTH_COOKIE_SAMESITE=None requires AUTH_COOKIE_SECURE=1. Every current browser "
+            "refuses to store a SameSite=None cookie that is not Secure, so sign-in would "
+            "appear to succeed and the next request would be 401."
+        )
+
     if samesite.lower() == "none" or not origins or not api_origin:
-        # `None` carries its own risks and they are not this one. No configured
-        # frontend origin means D-22's same-origin rewrite, which is the
-        # intended shape and needs no check.
+        # `None`'s remaining risks are not this one, and are discussed where it
+        # is configured. No configured frontend origin means D-22's same-origin
+        # rewrite, which is the intended shape and needs no check.
         return
 
     ours = _registrable_domain(api_origin)
@@ -189,6 +235,7 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
         )
 
     _assert_the_cookie_can_reach_us(app)
+    _assert_the_limiter_can_tell_callers_apart(app)
 
     # **Before `limiter.init_app`, and that is load-bearing.** Flask runs
     # `before_request` functions in registration order, and Flask-Limiter adds
@@ -207,9 +254,15 @@ def create_app(config_object: type[Config] | None = None) -> Flask:
     # and it is not paid by a flood: with no cookie `resolve` returns before it
     # queries anything, so an unauthenticated burst does no database work at
     # all.
-    auth_module.register(app)
+    auth_module.register_resolver(app)
 
     limiter.init_app(app)
+
+    # Hook three. Registered after the limiter so a request that fails
+    # authentication is still counted: `before_request` stops at the first
+    # exception, so a hook that raises before the limiter's makes every
+    # failed attempt free.
+    auth_module.register_enforcer(app)
 
     # `ERROR_SCHEMA` registers the Problem component itself, so registering it
     # again here raises DuplicateComponentNameError.
