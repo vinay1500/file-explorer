@@ -332,3 +332,73 @@ def test_health_is_exempt_from_the_limiter(wired: Flask) -> None:
         "silences the one endpoint that reports whether the service is alive"
     )
     assert statuses <= {200, 503}, f"unexpected statuses from health: {statuses}"
+
+
+# --- No DDL over HTTP, ever (F-04) ----------------------------------------
+
+# Every rule the application is allowed to register. An allowlist rather than a
+# pattern, because the route this guards against was called `/create-tables`
+# and no plausible pattern would have objected to that name.
+ALLOWED_RULES = frozenset(
+    {
+        "/static/<path:filename>",
+        "/api/openapi.json",
+        "/api/v1/health",
+        "/api/v1/roots",
+        "/api/v1/nodes",
+        "/api/v1/nodes/<int:node_id>",
+        "/api/v1/nodes/<int:node_id>/children",
+        "/api/v1/nodes/<int:node_id>/path",
+        "/api/v1/nodes/<int:node_id>/move",
+    }
+)
+
+
+def test_no_ddl_routes_registered(app: Flask) -> None:
+    """The deployed service exposed `GET /create-tables`, which ran `create_all()`.
+
+    That is the worst defect in the original and the reason this file exists.
+    An allowlist is the right shape here: the failure was not a route with a
+    suspicious name -- `/create-tables` is a perfectly ordinary name -- it was a
+    route nobody was counting. Anything new has to be added here deliberately,
+    and the diff that adds it is the review.
+    """
+    registered = {rule.rule for rule in app.url_map.iter_rules()}
+    unexpected = registered - ALLOWED_RULES
+    assert not unexpected, f"routes nobody accounted for: {sorted(unexpected)}"
+
+    # And the other direction, so the allowlist cannot quietly outlive the
+    # routes it describes and go on passing against an empty url map.
+    missing = ALLOWED_RULES - registered - {"/static/<path:filename>"}
+    assert not missing, f"the allowlist names routes that no longer exist: {sorted(missing)}"
+
+
+def test_the_source_contains_no_schema_creation_calls() -> None:
+    """`create_all` must not come back, by any route or none.
+
+    The route test above catches an endpoint that performs DDL. This catches the
+    call itself, reached any other way -- a CLI command, a request hook, a
+    well-meant "initialise on first run". Schema changes are Alembic migrations
+    run as a deployment step, which is why `migrations/` is deliberately not
+    searched.
+    """
+    import ast
+    from pathlib import Path
+
+    package = Path(__file__).resolve().parents[1] / "src" / "file_explorer"
+    assert package.is_dir(), f"{package} is not where this test expects it"
+
+    forbidden = {"create_all", "drop_all"}
+    offences: list[str] = []
+    seen = 0
+    for path in sorted(package.rglob("*.py")):
+        seen += 1
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in forbidden:
+                offences.append(f"{path.name}:{node.lineno} .{node.attr}")
+            elif isinstance(node, ast.Name) and node.id in forbidden:
+                offences.append(f"{path.name}:{node.lineno} {node.id}")
+
+    assert seen > 10, f"only {seen} modules walked; the glob is wrong and this proves nothing"
+    assert not offences, f"schema creation reached the package again: {offences}"

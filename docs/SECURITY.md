@@ -5,9 +5,22 @@ Rules for every contributor to **File Explorer**
 No payments, no file contents, no third-party data, no PII beyond an email address.
 
 Rules that can be tested get tested, because a rule that is only written down is a rule that
-drifts. **That suite does not exist yet.** `apps/api/tests/test_security.py` arrives at M5 with
-authentication; until then every rule below is a stated intention, and the test names given
-against them are the names they will have, not names you can run today.
+drifts.
+
+**Every test named below either exists today or is marked `(planned, Mx)`.** There is no third
+category, and that is enforced rather than promised: `test_every_test_named_in_the_documents_exists`
+reads this file, extracts every `test_` name and asserts the suite defines it. A planned name
+that has since arrived fails the same test, so this document cannot go on calling delivered work
+future either.
+
+That guard exists because the alternative was tried. An earlier version of this preamble said
+"the test names given against them are the names they will have, not names you can run today" —
+which was true of the session rules and false of fourteen names covering behaviour that had
+already shipped under better names. A blanket hedge in a preamble gets read as covering
+everything underneath it.
+
+`apps/api/tests/test_security.py` *(planned, M5.4)* is the dedicated suite for the session and
+enumeration rules in §2.5 and §2.6.
 
 ---
 
@@ -42,8 +55,9 @@ Node ids are sequential integers. `GET /api/v1/nodes/41` is a guess away from `/
   indistinguishable — same status, same body, same timing class.
 - `new_parent_id` on a move is validated for ownership before anything else. A cross-owner move
   is a 404 on the destination, not a cycle check failure.
-- Tests: `test_other_users_node_returns_404`, `test_cannot_move_into_another_users_folder`,
-  `test_list_never_returns_foreign_nodes`.
+- Tests: `test_no_route_reaches_another_owners_node`,
+  `test_cannot_move_into_another_users_folder`, `test_a_listing_shows_only_the_caller`,
+  `test_a_listing_stops_at_the_owner_boundary`.
 
 ### 2.2 Node name validation
 
@@ -57,15 +71,16 @@ one. Validated on the server, at creation and at rename:
   both exist in one folder.
 - Rendered as text, never as HTML. React escapes by default; the rule is that nothing introduces
   `dangerouslySetInnerHTML` into the tree view.
-- Tests: `test_name_rejects_path_separators`, `test_name_rejects_control_chars`,
-  `test_name_unicode_normalised`, `test_empty_name_returns_422`.
+- Tests: `test_names_that_are_rejected`, `test_the_rule_is_a_category_not_a_list`,
+  `test_two_spellings_of_one_name_collide_instead_of_coexisting`,
+  `test_a_blank_name_is_422_not_409`.
 
 ### 2.3 Mass assignment
 
 `PATCH /api/v1/nodes/{id}` accepts exactly one field: `name`. A marshmallow schema with
 `unknown = RAISE` rejects anything else, so `owner_id`, `parent_id`, `id` and `created_at` can
 never be set through a rename. Moves go through their own endpoint with their own checks.
-Test: `test_patch_rejects_unknown_fields`.
+Test: `test_an_unknown_field_is_422_not_silently_ignored`.
 
 ### 2.4 Cross-origin requests
 
@@ -76,7 +91,13 @@ cross-site request vector.
 
 - An explicit allowlist, read from `CORS_ALLOWED_ORIGINS`, with no wildcard.
 - `supports_credentials=True` only for listed origins.
-- Test: `test_cors_rejects_unlisted_origin` asserts the header is absent for an unknown origin.
+- Test: `test_cors_rejects_unlisted_origin` *(planned, M5.3)* asserts the header is absent for
+  an unknown origin.
+- **Decision D-22 changes what this section is for.** The frontend and the API are same-origin
+  via a Vercel rewrite of `/api/*` to the API service, so the browser never makes a cross-origin
+  request and `CORS_ALLOWED_ORIGINS` stays empty — which `config.py` already documents as the
+  correct default. The rules below are what applies *if* that ever changes; they are not
+  describing traffic that exists.
 
 ### 2.5 Session handling
 
@@ -85,7 +106,8 @@ cross-site request vector.
 - Because the credential is a cookie, CSRF protection is mandatory: a double-submit token
   required on every mutating request, compared against the cookie.
 - Short access-token lifetime with refresh; logout clears the cookie server-side.
-- Tests: `test_mutation_without_csrf_token_rejected`, `test_cookie_flags_set`.
+- Tests: `test_mutation_without_csrf_token_rejected` *(planned, M5.1)*,
+  `test_cookie_flags_set` *(planned, M5.1)*.
 
 ### 2.6 Authentication endpoints
 
@@ -93,17 +115,25 @@ cross-site request vector.
 - Rate limiting on register, login and refresh, by IP and by account.
 - Login returns the same response and the same timing class for an unknown email and a wrong
   password. No user enumeration.
-- Test: `test_login_does_not_enumerate_users`.
+- Test: `test_login_does_not_enumerate_users` *(planned, M5.4)*.
 
 ### 2.7 Denial of service through the tree
 
 The structure itself is the resource an attacker can abuse.
 
 - Depth capped at 64 (invariant I7), enforced on create and on move.
-- Subtree reads are depth-limited and paginated. No endpoint can be asked for an unbounded tree.
-- A per-user node count ceiling, returning `429`.
+- Every read is bounded. Listings are keyset-paginated with a hard page cap, the ancestry walk
+  carries a depth bound, and there is no endpoint that returns a whole subtree in one response.
+- A per-user node count ceiling, returning **`409`**. *Corrected 17 Nov: this said `429`, and the
+  code is right rather than the document — `errors.py` returns 409 with the reason recorded
+  alongside it, "a rate limit would be 429; this is not about how fast they asked". The ceiling is
+  a state conflict, not a pace.*
 - Recursive CTEs carry an explicit depth guard so a malformed tree cannot spin forever.
-- Tests: `test_depth_cap_enforced`, `test_subtree_requires_depth_bound`.
+- Tests: `test_a_chain_may_reach_the_cap_but_not_pass_it`, `test_depth_counts_subtree_height`.
+  *The second bullet above described depth-limited subtree reads and named a test for them.
+  There is no subtree endpoint: the service has no such method and
+  `test_the_document_declares_every_route` asserts exactly six paths. The bullet now says what is
+  true — every read is bounded — rather than naming an endpoint that does not exist.*
 
 ### 2.8 Schema and administrative endpoints
 
@@ -113,7 +143,10 @@ The current deployment exposes `GET /create-tables`, unauthenticated, which runs
 - No HTTP route performs DDL, ever.
 - Schema changes are Alembic migrations run as a deployment step.
 - `debug=True` does not appear in any file. Debug is read from the environment and defaults off.
-- Test: `test_no_ddl_routes_registered` walks the URL map and fails if a suspicious route exists.
+- Tests: `test_no_ddl_routes_registered` walks the URL map and asserts every registered rule is
+  one of the known endpoints, and `test_the_source_contains_no_schema_creation_calls` asserts
+  `create_all` and `drop_all` appear nowhere in the package. The first catches a route that
+  should not be there; the second catches the call even if it is reached some other way.
 
 ---
 

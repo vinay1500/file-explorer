@@ -51,9 +51,12 @@ def _collected() -> set[str]:
         found.add(path.stem)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                if node.name.startswith("test_"):
-                    found.add(node.name)
+            # A `continue` rather than a nested `if`: ruff's SIM102 wants the two
+            # conditions combined, and combined they are 106 characters.
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if node.name.startswith("test_"):
+                found.add(node.name)
     return found
 
 
