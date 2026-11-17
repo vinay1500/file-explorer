@@ -291,7 +291,15 @@ def test_an_expired_session_is_401_and_is_deleted(client: FlaskClient, session: 
 
     A `WHERE expires_at > now()` would hide it and leave it to accumulate.
     """
-    session.execute(text("UPDATE sessions SET expires_at = now() - interval '1 second'"))
+    # `created_at` moves too: `ck_sessions_expiry_after_creation` forbids a row
+    # that expires before it begins, which is the constraint doing its job on
+    # the test that forgot about it.
+    session.execute(
+        text(
+            "UPDATE sessions SET created_at = now() - interval '2 days', "
+            "expires_at = now() - interval '1 second'"
+        )
+    )
     session.commit()
 
     assert client.get("/api/v1/roots").status_code == 401
@@ -390,4 +398,6 @@ def test_a_session_only_ever_sees_its_own_owners_tree(
 
     roots = as_alice.get("/api/v1/roots").get_json()
     assert [n["name"] for n in roots["items"]] == ["alice-root"]
-    assert as_alice.get(f"/api/v1/nodes/{bobs}").status_code == 404
+    # `/nodes/{id}` carries PATCH and DELETE, not GET, so the read that proves
+    # isolation is the breadcrumb walk.
+    assert as_alice.get(f"/api/v1/nodes/{bobs}/path").status_code == 404

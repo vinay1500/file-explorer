@@ -78,17 +78,26 @@ CSRF_HEADER = "X-CSRF-Token"
 #: Methods that cannot change anything, and therefore need no CSRF token.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-#: Endpoints reachable without a session. Everything else requires one.
+#: Routes reachable without a session. Everything else requires one.
 #:
-#: An allowlist, and short on purpose. The failure this prevents is a route
-#: added later that nobody remembers to protect -- the default has to be
+#: Matched on the **rule** rather than on the endpoint name, because an
+#: endpoint name is derived from a view function or a `MethodView` subclass and
+#: changes when either is renamed -- silently, and in the direction that opens
+#: a route. The rule is the thing a reviewer can read off the URL.
+#:
+#: An allowlist, and short on purpose. The failure it prevents is a route added
+#: later that nobody remembers to protect: the default has to be
 #: "authenticated" so that forgetting is a 401 rather than a leak.
-PUBLIC_ENDPOINTS = frozenset(
+PUBLIC_RULES = frozenset(
     {
-        "health",
-        "static",
+        "/api/v1/health",
+        # Sign in and sign up, which by definition cannot require a session.
+        # `logout` and `me` are under the same prefix and both require one.
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
         # flask-smorest serves the generated document here.
-        "api-docs.openapi_json",
+        "/api/openapi.json",
+        "/static/<path:filename>",
     }
 )
 
@@ -116,8 +125,8 @@ def authenticate() -> None:
     g.actor_id = None
     g.csrf_token = None
 
-    endpoint = request.endpoint
-    if endpoint is None or endpoint in PUBLIC_ENDPOINTS:
+    rule = request.url_rule
+    if rule is None or rule.rule in PUBLIC_RULES:
         return
 
     service = SessionService(db.session)

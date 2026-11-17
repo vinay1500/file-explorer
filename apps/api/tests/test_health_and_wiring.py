@@ -114,7 +114,7 @@ def test_an_unexpected_error_inside_a_route_does_not_leak(
     # what the last-resort handler does with an exception, not about who was
     # allowed to cause one. Through `monkeypatch` so the allowlist is restored
     # -- a module-level set that one test widens is a set that stays wide.
-    monkeypatch.setattr(auth, "PUBLIC_ENDPOINTS", auth.PUBLIC_ENDPOINTS | {"_boom"})
+    monkeypatch.setattr(auth, "PUBLIC_RULES", auth.PUBLIC_RULES | {"/api/v1/boom"})
 
     @built.get("/api/v1/boom")
     def _boom() -> str:
@@ -164,7 +164,7 @@ def test_a_forwarded_address_is_trusted_only_when_configured(
     # Public for the duration: `before_request` would 401 this ad-hoc route
     # before the view could record anything, and what is under test is which
     # address ProxyFix leaves behind, not who is allowed to ask.
-    monkeypatch.setattr(auth, "PUBLIC_ENDPOINTS", auth.PUBLIC_ENDPOINTS | {"_whoami"})
+    monkeypatch.setattr(auth, "PUBLIC_RULES", auth.PUBLIC_RULES | {"/api/v1/whoami"})
 
     def record(built: Flask) -> str | None:
         @built.get("/api/v1/whoami")
@@ -228,7 +228,7 @@ def test_a_marshmallow_error_raised_outside_a_route_is_still_a_problem(
     # an ad-hoc route on a fresh app is a 401 before the view raises anything
     # -- which is the point of moving it there, and is why this test went red
     # on a change that had nothing to do with validation.
-    monkeypatch.setattr(auth, "PUBLIC_ENDPOINTS", auth.PUBLIC_ENDPOINTS | {"_validate"})
+    monkeypatch.setattr(auth, "PUBLIC_RULES", auth.PUBLIC_RULES | {"/api/v1/validate"})
 
     @built.get("/api/v1/validate")
     def _validate() -> str:

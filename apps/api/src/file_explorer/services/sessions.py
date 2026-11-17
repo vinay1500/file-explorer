@@ -11,9 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import scoped_session
 
 from file_explorer.models.session import (
     Session,
@@ -59,7 +61,7 @@ class Resolved:
 
 
 class SessionService:
-    def __init__(self, db: DbSession) -> None:
+    def __init__(self, db: DbSession | scoped_session[DbSession]) -> None:
         self._db = db
 
     def begin(self, user_id: int, lifetime: timedelta = DEFAULT_LIFETIME) -> Issued:
@@ -123,7 +125,7 @@ class SessionService:
         if not token:
             return 0
         result = self._db.execute(delete(Session).where(Session.token_hash == token_digest(token)))
-        return int(result.rowcount or 0)
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
 
     def revoke_all(self, user_id: int) -> int:
         """End every session for one account.
@@ -132,7 +134,7 @@ class SessionService:
         do. It reads `ix_sessions_user_id` rather than the table.
         """
         result = self._db.execute(delete(Session).where(Session.user_id == user_id))
-        return int(result.rowcount or 0)
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
 
     def purge_expired(self, now: datetime | None = None) -> int:
         """Delete rows that can no longer authenticate anyone.
@@ -148,4 +150,4 @@ class SessionService:
                 (Session.expires_at <= at) | (Session.last_seen_at + IDLE_LIFETIME <= at)
             )
         )
-        return int(result.rowcount or 0)
+        return int(cast("CursorResult[Any]", result).rowcount or 0)
