@@ -28,6 +28,10 @@ dependencies = [
     # rather than the library's defaults -- see `passwords.py` for why the
     # defaults do not fit a 512 MB shared instance.
     "argon2-cffi>=23.1",
+    # The WSGI server the deployment runs. A dependency rather than a thing the
+    # host happens to provide, so `render.yaml`'s start command is reproducible
+    # from this file alone.
+    "gunicorn>=23.0",
 ]
 
 [project.optional-dependencies]

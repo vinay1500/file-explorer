@@ -1,0 +1,85 @@
+# The deployed API, as a file rather than as dashboard settings.
+#
+# F-23 was that the running system existed only in a web form: no Procfile, no
+# render.yaml, no Dockerfile, nothing. Nobody could recreate it, and when it
+# broke nobody could see what it had been. This is the fix, and the test for it
+# is that a reviewer can read this file and know what runs.
+#
+# Two things here are deliberate and easy to get wrong.
+#
+# **Migrations run before the new code serves traffic.** `preDeployCommand` runs
+# after the build and before the switch, so a release whose migration fails does
+# not replace a working instance with a broken one. The alternative -- migrating
+# on start-up inside the worker -- races every other worker and has no way to
+# refuse.
+#
+# **No secret is in this file.** `sync: false` means "ask me once in the
+# dashboard and remember it", so the value never enters version control. A
+# public repository is the wrong place for a connection string and the wrong
+# place for a signing key, and `generateValue` covers the one secret nobody has
+# to choose.
+
+services:
+  - type: web
+    name: file-explorer-api
+    runtime: python
+    plan: free
+    region: singapore
+    rootDir: apps/api
+
+    # 3.11 to match CI and the version the original deployment was already
+    # running. The committed virtualenv in the old repository was 3.12, which
+    # was never the interpreter that served a request.
+    runtimeVersion: "3.11"
+
+    buildCommand: pip install --upgrade pip && pip install .
+    preDeployCommand: flask db upgrade
+
+    # Two workers on a free instance, because one worker serving a 50-second
+    # cold start blocks the health probe behind it. `--timeout 30` is longer
+    # than any statement budget (5 s) plus a retry, so a worker is only killed
+    # when something is genuinely stuck rather than merely slow.
+    startCommand: >-
+      gunicorn 'file_explorer.app:create_app()'
+      --workers 2 --timeout 30 --access-logfile - --error-logfile -
+
+    healthCheckPath: /api/v1/health
+
+    envVars:
+      - key: FLASK_APP
+        value: file_explorer.app:create_app
+
+      # Asked for once in the dashboard. Never in the repository.
+      - key: DATABASE_URL
+        sync: false
+
+      # Flask's own signing key. Not a session key: D-21 made the session an
+      # opaque id in a table, so nothing is signed and there is no JWT secret.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # HTTPS everywhere that matters, so the session cookie carries Secure.
+      - key: AUTH_COOKIE_SECURE
+        value: "1"
+      # `Lax` is correct **because** the browser reaches this service through
+      # the rewrite in `vercel.json` and never makes a cross-site request.
+      # If that ever changes, `create_app` refuses to start rather than
+      # shipping a cookie the browser will not store.
+      - key: AUTH_COOKIE_SAMESITE
+        value: Lax
+
+      # There IS a proxy in front of this service, so the app refuses to start
+      # until the hop count is set -- otherwise `remote_addr` is an edge
+      # address for every caller on earth and the login rate limit becomes one
+      # shared bucket. The number must be measured against the deployed stack
+      # and not guessed: one hop too many lets a caller set their own
+      # X-Forwarded-For and choose their own bucket. Task M7.9.
+      - key: BEHIND_PROXY
+        value: "1"
+      - key: TRUST_PROXY_HOPS
+        sync: false
+
+      # Empty is correct: the rewrite makes every request same-origin, so the
+      # API never sends a CORS header and never needs an allowlist.
+      - key: CORS_ALLOWED_ORIGINS
+        value: ""
