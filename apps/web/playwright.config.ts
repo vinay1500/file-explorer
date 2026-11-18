@@ -23,9 +23,17 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: "npm run build && npm run preview -- --port 4173 --strictPort",
+    // `--host 127.0.0.1` is load-bearing, not tidiness. `vite preview`
+    // otherwise binds `localhost`, which on a CI runner resolves to `::1`
+    // first -- so the server is up and `http://127.0.0.1:4173` is still
+    // refused, and Playwright reports it as a two-minute start-up timeout
+    // rather than as an address mismatch. That error names the wrong cause,
+    // which is the expensive kind.
+    command: "npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    // The command type-checks and builds before it serves, so this covers a
+    // cold `tsc` on a slow runner as well as the server itself.
+    timeout: 180_000,
   },
 });
