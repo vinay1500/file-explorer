@@ -35,7 +35,18 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 TESTS = Path(__file__).resolve().parent
-DOCS = (ROOT / "docs" / "SECURITY.md", ROOT / "docs" / "ARCHITECTURE.md")
+#: Every committed document that names tests or tools, not just the two in
+#: `docs/`. The README was outside this tuple until 18 November, which is how
+#: three ticked claims elsewhere came to name tests that do not exist -- the
+#: guard was not wrong, its scope was, and nobody had said so out loud. The
+#: README is the document most likely to be read and least likely to be
+#: re-checked, so leaving it out was the wrong way round.
+DOCS = (
+    ROOT / "README.md",
+    ROOT / "CONTRIBUTING.md",
+    ROOT / "docs" / "SECURITY.md",
+    ROOT / "docs" / "ARCHITECTURE.md",
+)
 
 # A name in prose, in a table cell or in backticks.
 NAME = re.compile(r"\btest_[a-z0-9_]+")
