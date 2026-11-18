@@ -55,6 +55,21 @@ async function dragOnto(page: Page, source: Locator, target: Locator): Promise<v
   await source.dispatchEvent("dragstart", { dataTransfer });
   await target.dispatchEvent("dragenter", { dataTransfer });
   await target.dispatchEvent("dragover", { dataTransfer });
+
+  // Wait for the library to acknowledge the hover before dropping.
+  //
+  // This is not padding. `dragover` sets react-dnd's current drop target
+  // through a React state update; dispatching `drop` in the same tick lands
+  // while that target is still null, and the drop is discarded with no error.
+  // It fails *intermittently*, which is the worst kind: the first version of
+  // this test passed on one CI run and failed on the next with no code
+  // changed between them.
+  //
+  // `classes.dropTarget` is applied exactly when the library considers the
+  // element hovered, so waiting for it waits for the real condition rather
+  // than for a duration.
+  await expect(target).toHaveClass(/tree-drop/, { timeout: 5_000 });
+
   await target.dispatchEvent("drop", { dataTransfer });
   await source.dispatchEvent("dragend", { dataTransfer });
   await dataTransfer.dispose();

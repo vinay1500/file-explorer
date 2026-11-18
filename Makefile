@@ -105,12 +105,23 @@ typecheck: ## mypy and tsc
 
 openapi: ## Regenerate the OpenAPI document and the web client types
 	$(need-apps)
-	$(API) python -m file_explorer.cli openapi > apps/api/openapi.json
-	$(WEB) npx openapi-typescript /app/../api/openapi.json -o src/api/generated/schema.d.ts
+	$(API) python -m file_explorer.cli openapi > apps/api/docs/openapi.json
+	$(WEB) npx openapi-typescript ../api/docs/openapi.json -o src/api/schema.d.ts
 
-a11y: ## axe-core against the running web app
-	$(need-apps)
-	$(WEB) npx playwright test --grep @a11y
+a11y: ## NOT IMPLEMENTED - see docs/DESIGN-SYSTEM.md section 8
+	@echo ""
+	@echo "  There is no accessibility check in this project."
+	@echo ""
+	@echo "  This target used to shell into a container that has never been built"
+	@echo "  and grep Playwright for @a11y, a tag no test carries. It could not"
+	@echo "  have passed or failed; it could only sit there answering the question"
+	@echo "  'is accessibility checked?' with a file path instead of a result."
+	@echo ""
+	@echo "  What IS true is listed in docs/DESIGN-SYSTEM.md section 8, next to"
+	@echo "  what is not. Reaching WCAG 2.2 AA needs a keyboard move path, and"
+	@echo "  that is not scheduled. Decision D-23."
+	@echo ""
+	@exit 1
 
 guards: ## How each guard was proven to bite, and where
 	@echo ""
