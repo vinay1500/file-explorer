@@ -118,6 +118,75 @@ def test_nothing_marked_planned_has_already_arrived() -> None:
     )
 
 
+#: Tools a committed document once presented as delivered, that are not.
+#:
+#: Each has to stay struck through, marked cut, or gone. The list is explicit
+#: rather than derived: a scanner that guesses which bolded words in a prose
+#: table are Python packages produces false positives, and this repository has
+#: already backed one such checker out for exactly that reason. A guard that
+#: disagrees with reality is worse than no guard. This one cannot be wrong
+#: about the cases it knows, and is silent about everything else -- which is
+#: the honest trade and is stated here so nobody mistakes it for coverage.
+CUT_CLAIMS = {
+    # Named in ARCHITECTURE.md's stack table as the logging solution from
+    # 13 November. Never a dependency, implemented nowhere, scheduled in no
+    # task. Section 19 of the teardown had been carrying "could not claim
+    # anything about structured logging" for days while the document that
+    # would be read first still advertised it.
+    "structlog": "cut 18 Nov -- the standard library's logging is what runs",
+}
+
+#: A cut claim is allowed to appear if it is visibly marked as cut.
+CUT_MARKERS = ("~~", "Claim cut", "claim cut", "not delivered", "cut rather than")
+
+
+@pytest.mark.invariant
+@pytest.mark.parametrize("doc", DOCS, ids=lambda p: p.name)
+def test_no_document_still_advertises_a_claim_that_was_cut(doc: Path) -> None:
+    """A document read before the code is the one that must not overstate it.
+
+    The failure is not "we did not build it". Deciding not to build something
+    is fine and happens three times in this project. The failure is a table
+    row that still reads as a feature after the decision went the other way,
+    because the row is what a reviewer sees and the decision is not.
+
+    `structlog` sat in `ARCHITECTURE.md` for five days as the logging
+    solution. The teardown's own "what you may claim" section listed it as
+    *not* claimable over the same period. Two committed artefacts, opposite
+    stories, and nothing compared them.
+    """
+    text = doc.read_text(encoding="utf-8")
+    for claim, why in sorted(CUT_CLAIMS.items()):
+        for line in text.splitlines():
+            if claim not in line:
+                continue
+            assert any(marker in line for marker in CUT_MARKERS), (
+                f"{doc.name} still presents {claim!r} as delivered ({why}). Strike it through or "
+                f"say it was cut, or a reviewer reads the row as a feature that exists."
+            )
+
+
+@pytest.mark.invariant
+def test_the_cut_claim_guard_would_notice(tmp_path: Path) -> None:
+    """The guard above passes trivially if the claim is simply absent.
+
+    So this proves it can fail: the same check, against a line that names a cut
+    claim with no marker on it. Without this, deleting every mention of
+    `structlog` would leave a green test that asserts nothing -- which is the
+    vacuous shape M4 found five of.
+    """
+    claim = next(iter(CUT_CLAIMS))
+    unmarked = f"| Logging | Flask default | **{claim}**, JSON, request-id bound | |"
+    assert claim in unmarked
+    assert not any(marker in unmarked for marker in CUT_MARKERS), (
+        "the fixture line is already marked as cut, so this test cannot fail"
+    )
+    marked = f"| Logging | Flask default | ~~{claim}~~ -> stdlib logging | Claim cut |"
+    assert any(marker in marked for marker in CUT_MARKERS), (
+        "a correctly marked line is being read as an unmarked claim"
+    )
+
+
 @pytest.mark.invariant
 def test_the_guard_can_see_the_suite_it_is_guarding() -> None:
     """A guard that collects nothing would pass while proving nothing.

@@ -41,18 +41,18 @@ trash/restore, search, real-time collaboration.
 | Tree / drag-drop | react-dnd 16 + @minoru/react-dnd-treeview 3.5 ✅ | Same | `canDrop` **disables** the library's descendant check rather than adding to it — settled from source, 18 Nov |
 | Styling | Inline style objects + two CSS files ✅ | CSS custom properties + CSS Modules | See DESIGN-SYSTEM.md |
 | Web tests | one failing CRA default ✅ | **Vitest + Testing Library + Playwright** | |
-| API language | Python 3.12 ✅ | Python 3.12 | Kept |
-| API framework | Flask 3.1.0 ✅ | Flask 3.1 + **flask-smorest** | Decision D-03: stay on Flask |
-| Validation | none ✅ | **marshmallow 3** via flask-smorest | Also generates OpenAPI |
-| ORM | Flask-SQLAlchemy 3.1.1 / SQLAlchemy 2.0.40 ✅ | Same | |
+| API language | Python 3.12 ✅ | **Python 3.11.18** | Pinned twice — `PYTHON_VERSION` and `.python-version` — and matched by CI. The 3.12 in the committed virtualenv was never the interpreter that served a request |
+| API framework | Flask 3.1.0 ✅ | Flask **3.1.3** + **flask-smorest 0.47** | Decision D-03: stay on Flask. Versions read off the 18 Nov deployment |
+| Validation | none ✅ | **marshmallow 4.4** via flask-smorest | Also generates OpenAPI. This said "marshmallow 3"; the resolved version is 4 |
+| ORM | Flask-SQLAlchemy 3.1.1 / SQLAlchemy 2.0.40 ✅ | Flask-SQLAlchemy 3.1.1 / **SQLAlchemy 2.1.9** | |
 | Migrations | none — `db.create_all()` ✅ | **Alembic** via Flask-Migrate | |
 | Auth | none ✅ | **Opaque session id** in an httpOnly cookie, rows in `sessions` | D-05, amended by **D-21**: not a JWT. ADR 0004 |
 | Password hashing | none ✅ | **argon2-cffi** | |
 | Rate limiting | none ✅ | **Flask-Limiter** | Auth endpoints only |
-| Logging | Flask default ✅ | **structlog**, JSON, request-id bound | |
+| Logging | Flask default ✅ | ~~structlog, JSON, request-id bound~~ → the standard library's `logging` | **Claim cut, not delivered.** `structlog` is not a dependency, is implemented nowhere and is scheduled in no task. Recording it as cut rather than leaving a row that reads as a feature. Same treatment as the design-system claim under D-23 |
 | DB driver | psycopg2-binary 2.9.10 ✅ | **psycopg 3** | What a bare `postgresql://` resolves to in SQLAlchemy 2.x; `PyMySQL` removed |
 | Database | PostgreSQL ✅ | PostgreSQL 18 | Recursive CTEs, partial unique indexes. Managed by Neon in Singapore; CI pins the same major version |
-| WSGI | gunicorn 23.0.0 ✅ | gunicorn | |
+| WSGI | gunicorn 23.0.0 ✅ | **gunicorn 27.0.1**, 2 workers, 30s timeout | The access log format carries `X-Forwarded-For`, which is the only way to measure the proxy hop count on a free instance |
 | API tests | none ✅ | **pytest** + pytest-cov against real PostgreSQL | |
 | Lint / format | eslint-config-react-app ✅ | **Ruff** (api), **ESLint 9 + Prettier** (web) | |
 | Type check | none ✅ | **mypy** (api), **tsc** (web) | |
