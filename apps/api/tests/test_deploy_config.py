@@ -117,6 +117,10 @@ def test_the_hop_count_can_actually_be_measured() -> None:
     )
 
 
+#: The destination host in `vercel.json`'s rewrite.
+REWRITE_HOST = re.compile(r'"destination"\s*:\s*"https://([^/"]+)')
+
+
 @pytest.mark.invariant
 def test_the_rewrite_points_at_the_service_this_repository_declares() -> None:
     """Two files, one deployment, and nothing was checking they agreed.
@@ -128,17 +132,56 @@ def test_the_rewrite_points_at_the_service_this_repository_declares() -> None:
     reached a host this repository never deploys to.
 
     This is F-23's other half: committing the deployment is only worth
-    something if the committed files cannot quietly disagree. The service name
-    is the one string that has to appear in both.
+    something if the committed files cannot quietly disagree.
+
+    **The first version of this test was wrong, and wrong in the worst
+    direction.** It asserted the literal `<name>.onrender.com` appeared in
+    `vercel.json`, because that is the hostname Render gives a service whose
+    subdomain is free. `file-explorer-api` was taken, so the real service is
+    `file-explorer-api-xgxr.onrender.com` -- and the test therefore *passed* on
+    the stale host and would have *failed* on the correct one. A guard that
+    enforces the wrong value is worse than no guard: it is an argument against
+    fixing the bug.
+
+    So the name is matched as a **prefix**, which is what Render actually
+    guarantees: your service name, optionally a hyphen and a random suffix,
+    then `.onrender.com`. That still rejects the old service and any unrelated
+    host, which is the property worth having.
     """
     text = RENDER.read_text(encoding="utf-8")
     service = re.search(r"^\s*-\s*type:\s*web\s*$\n\s*name:\s*(\S+)", text, re.M)
     assert service, "render.yaml declares no web service name"
     name = service.group(1)
     rewrite = VERCEL.read_text(encoding="utf-8")
-    assert f"{name}.onrender.com" in rewrite, (
-        f"render.yaml deploys {name!r} and vercel.json rewrites somewhere else, so the frontend "
-        "would call a host nothing in this repository deploys to"
+    host = REWRITE_HOST.search(rewrite)
+    assert host, "vercel.json has no https rewrite destination"
+    pattern = rf"^{re.escape(name)}(-[a-z0-9]+)?\.onrender\.com$"
+    assert re.match(pattern, host.group(1)), (
+        f"render.yaml deploys {name!r} and vercel.json rewrites to {host.group(1)!r}, so the "
+        "frontend would call a host nothing in this repository deploys to"
+    )
+
+
+@pytest.mark.invariant
+def test_the_rewrite_keeps_the_path_and_stays_on_https() -> None:
+    """The rewrite is what makes the cookie same-site, so its shape matters.
+
+    Dropping `/api/:path*` from the destination sends every call to the service
+    root, which answers 404 for all of them. Downgrading to `http` makes a
+    `Secure` cookie unsendable. Neither failure produces an error anywhere in
+    this repository -- they produce a demo that does not work.
+    """
+    rewrite = VERCEL.read_text(encoding="utf-8")
+    assert '"source": "/api/:path*"' in rewrite, (
+        "vercel.json no longer rewrites /api/:path*, so the browser would reach Vercel's own "
+        "static hosting for every API call"
+    )
+    assert re.search(r'"destination"\s*:\s*"https://', rewrite), (
+        "the rewrite destination is not https, and a Secure cookie cannot travel over http"
+    )
+    assert rewrite.count("/api/:path*") == 2, (
+        "the destination dropped the :path* suffix, so every API call would land on the service "
+        "root and answer 404"
     )
 
 

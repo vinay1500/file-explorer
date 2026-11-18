@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://file-explorer-api.onrender.com/api/:path*"
+      "destination": "https://file-explorer-api-xgxr.onrender.com/api/:path*"
     }
   ]
 }
