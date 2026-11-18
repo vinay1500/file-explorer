@@ -126,9 +126,11 @@ means the database replied rather than that the process is alive. The original r
 constant string; it could not fail while the process ran, which is the entire mechanism of this
 chapter.
 
-**A GitHub Actions workflow probes it twice a day**, at 05:30 and 09:00 UTC — the hours somebody
-is around to act on a failure — and fails the workflow on anything that is not a `200`, which
-sends an email. The first real run returned `{"db":"ok","status":"ok"}`.
+**A GitHub Actions workflow probes it twice a day on weekdays**, at 05:30 and 09:00 UTC — the
+hours somebody is around to act on a failure — and fails the workflow on anything that is not a
+`200`, which sends an email. Weekdays, deliberately: nobody is going to act on a Saturday alert,
+and a check that fires when it will be ignored trains people to ignore it. The cost is stated
+rather than hidden — **a Friday evening outage is unobserved until Monday 05:30 UTC.** The first real run returned `{"db":"ok","status":"ok"}`.
 
 Two details from building it are worth more than the fact that it exists:
 
@@ -146,5 +148,5 @@ whether a lesson was learned.
 
 ---
 
-**Related:** [Chapter 17 · Architecture on no budget](README.md) ·
-[Chapter 8 · The register](README.md)
+**Related:** [Chapter 17 · Architecture on no budget](17-architecture-on-no-budget.md) ·
+[Chapter 8 · The register](README.md) *(not yet written)*

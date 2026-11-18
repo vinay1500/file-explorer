@@ -38,7 +38,7 @@ GUEST_RETENTION = timedelta(hours=24)
 GUEST_EMAIL_DOMAIN = "guests.invalid"
 
 #: A tree with something to drag, somewhere to drag it, and three levels so the
-#: breadcrumb endpoint has something to say. Nine nodes: small enough to be
+#: breadcrumb endpoint has something to say. Ten nodes: small enough to be
 #: free, interesting enough that the first thing a visitor does is move one.
 #:
 #: Nested rather than two fixed levels, because the first version of this was

@@ -11,10 +11,11 @@ is alive. *First request after fifteen idle minutes takes 30–60 seconds: the i
 free plan and spins down.*
 
 > **Status, honestly.** The API is finished and running: schema, service layer, HTTP layer,
-> session authentication, 279 tests against real PostgreSQL. **The interface is not.**
-> `apps/web` is still the April 2025 Create React App code and is not deployed — so there is
-> nothing to click yet beyond the API itself. That rebuild is the next milestone, and this
-> README will say so until it lands.
+> session authentication, 281 tests against real PostgreSQL. **The interface is built and not
+> yet deployed.** `apps/web` is Vite 7, React 19 and TypeScript 5 with a drag-and-drop tree,
+> 25 unit tests and 2 browser tests — but `file-explorer-frontend.vercel.app` still serves the
+> April 2025 Create React App bundle, so there is nothing to click yet beyond the API itself.
+> Connecting the deployment is the last task.
 
 ---
 
@@ -77,7 +78,7 @@ error message live in the service layer. Most live in both.
 
 ## The API
 
-Eleven routes, published as an [OpenAPI 3.1 document](apps/api/docs/openapi.json) that is
+Eleven paths and twelve operations, published as an [OpenAPI 3.0.3 document](apps/api/docs/openapi.json) that is
 generated, committed, and compared against the live application in CI — a drifted document
 fails the build rather than misleading a client.
 
@@ -114,8 +115,8 @@ list of routes is a thing somebody forgets to extend.
 An opaque session id in a `sessions` table, not a JWT. A JWT buys verification without touching
 the database; this application queries PostgreSQL on every request from a single instance, so
 that benefit can never be collected while every cost — unrevocable tokens, key rotation, a
-refresh-token table anyway — is still paid. The row is the primary key's SHA-256 of the cookie
-value, cascading from `users`, so deleting an account ends its sessions in the same statement.
+refresh-token table anyway — is still paid. The row's primary key is the SHA-256 of the cookie
+value, and it cascades from `users`, so deleting an account ends its sessions in the same statement.
 
 Passwords are argon2id at **OWASP's minimum** — 19456 KiB, t=2, p=1 — rather than the library's
 defaults, which want roughly 64 MiB and four lanes and do not fit a 512 MB instance. CSRF is a
@@ -167,16 +168,16 @@ The eight invariants this schema and its service layer maintain are listed in
 
 ## Tests
 
-279 against **real PostgreSQL 18.7** in GitHub Actions — the same major version the deployed
+281 against **real PostgreSQL 18.7** in GitHub Actions — the same major version the deployed
 database runs — and never SQLite. Recursive CTEs, `SELECT … FOR NO KEY UPDATE` and partial
 unique indexes all behave differently there, so a suite that passes on SQLite has tested a
 different program.
 
-Branch coverage is a **gate at 99.62%**, not a report. It has earned that: deleting three health
+Branch coverage is a **gate**, not a report: CI runs `--fail-under=99.5` and the suite currently measures 99.62%. It has earned that: deleting three health
 tests once left every remaining test passing and only the floor noticed.
 
-Coverage says a line ran, not that a guard works. So twenty mutations are recorded in
-[`docs/MUTATIONS.md`](docs/MUTATIONS.md) with the CI run that caught each one — and two of those
+Coverage says a line ran, not that a guard works. So twenty-one mutations are recorded in
+[`docs/MUTATIONS.md`](docs/MUTATIONS.md), twenty of them with the CI run that caught them — and two of those
 runs taught something the practice needed: **a mutation that fails to apply looks exactly like a
 guard that works.** One replaced the first of two identical lines; another stripped a decorator
 without its indentation and produced a syntax error that read, at a glance, like a test failure.
@@ -187,7 +188,7 @@ without its indentation and produced a syntax error that read, at a glance, like
 
 ```
 apps/api     Flask API — PostgreSQL, SQLAlchemy, Alembic, flask-smorest
-apps/web     React frontend — still the April 2025 code, not yet rebuilt
+apps/web     React frontend — Vite 7, React 19, TypeScript 5 (rebuilt; not yet deployed)
 docs/        architecture, security, ADRs, the change log
 render.yaml  the deployed API, as a file rather than as dashboard settings
 vercel.json  the rewrite that makes the session cookie same-site
@@ -198,7 +199,7 @@ replaces, with a committed virtualenv removed from every commit.
 
 `render.yaml` exists because the running system previously existed only as dashboard settings —
 no `Procfile`, no `Dockerfile`, nothing. Nobody could recreate it, and when it broke nobody could
-see what it had been. Six tests keep it honest, including one that fails if the service name it
+see what it had been. Ten tests keep it honest, including one that fails if the service name it
 declares stops matching the host `vercel.json` rewrites to.
 
 ---
@@ -233,7 +234,7 @@ one to read.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Data model, the eight invariants, the move algorithm, API conventions |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat surface, and the test that enforces each rule |
 | [docs/adr/](docs/adr/) | Five decision records, including why not `SERIALIZABLE` |
-| [docs/MUTATIONS.md](docs/MUTATIONS.md) | Twenty mutation runs, with the CI id that caught each |
+| [docs/MUTATIONS.md](docs/MUTATIONS.md) | Twenty-one mutation runs. Twenty carry the CI id that caught them; the twenty-first reddens a *build* and was verified locally |
 | [docs/book/](docs/book/) | The long-form write-up, a chapter per problem |
 | [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) | Written ahead of the frontend rebuild. **Specifies more than exists** — treat it as the target, not a description |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Project rules, commit conventions, definition of done |
