@@ -15,6 +15,7 @@ test a file the API never reads.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -182,6 +183,46 @@ def test_the_rewrite_keeps_the_path_and_stays_on_https() -> None:
     assert rewrite.count("/api/:path*") == 2, (
         "the destination dropped the :path* suffix, so every API call would land on the service "
         "root and answer 404"
+    )
+
+
+@pytest.mark.invariant
+def test_the_frontend_build_is_a_file_not_a_dashboard_setting() -> None:
+    """F-23's other half, found when the frontend would not deploy.
+
+    `render.yaml` exists because the API's deployment lived only as dashboard
+    settings: nobody could recreate it and nobody could see what it had been.
+    The frontend had exactly the same problem and nobody noticed, because the
+    frontend had never been deployed at all -- its build command, output
+    directory and framework existed only in a web form, and the first evidence
+    of that was a build failing against an archived repository.
+
+    Vercel resolves these from `vercel.json` in preference to the dashboard, so
+    putting them here makes the file authoritative rather than decorative.
+
+    `npm ci` and not `npm install`: there is a committed lockfile, and `ci`
+    fails when it disagrees with `package.json` instead of quietly resolving
+    something else -- the same reasoning as the CI job.
+    """
+    config = json.loads(VERCEL.read_text(encoding="utf-8"))
+
+    assert config.get("framework") == "vite", (
+        "vercel.json does not declare the framework, so the preset falls back to whatever the "
+        "dashboard happens to say"
+    )
+    build = config.get("buildCommand", "")
+    assert "apps/web" in build, (
+        f"vercel.json's buildCommand does not enter apps/web: {build!r}. The repository root has "
+        "no package.json, so a build run there produces nothing and the last good deployment is "
+        "served instead -- silently"
+    )
+    assert "npm ci" in build, (
+        f"vercel.json's buildCommand does not use `npm ci`: {build!r}. There is a committed "
+        "lockfile and `npm install` would ignore a disagreement with package.json"
+    )
+    assert config.get("outputDirectory") == "apps/web/dist", (
+        "vercel.json does not declare where the build output lands, so Vercel looks in the "
+        "repository root and finds nothing"
     )
 
 
