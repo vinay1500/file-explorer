@@ -198,20 +198,64 @@ the state change.
 
 ## 8. Accessibility
 
-Target: **WCAG 2.2 AA**. This is a testable claim, so it is tested — `make a11y` runs
-axe-core against the running app in CI, and the Playwright suite drives the tree by keyboard
-only. A target that is not checked is not kept.
+> **This section was cut down on 2026-11-18 and the original is below it, struck through.**
+> It described a target nothing was scheduled to build and a `make a11y` that does not exist.
+> A document that specifies more than the code does is not ambition, it is a false claim that
+> survives review because nobody diffs prose against behaviour. Decision D-23: cut the claim
+> rather than build to it, and say which it was.
 
-- The tree is a real `role="tree"` with `role="treeitem"`, `aria-expanded`, `aria-level`,
-  `aria-selected`. Arrow keys navigate, Right/Left expand and collapse, Enter renames,
-  Delete removes, Escape cancels.
-- **Drag-and-drop has a keyboard equivalent.** Cut-and-paste style: select, `Ctrl/Cmd+X`,
-  navigate to destination, `Ctrl/Cmd+V`. Drag-only is a failure at AA.
-- Every icon-only control has an accessible name. Folder and file are distinguished by icon
-  *and* by an `aria-label`, never by colour.
-- Visible focus on every interactive element, never `outline: none` without a replacement.
-- Live region announces the outcome of each mutation ("Moved Reports into Archive").
+**What is true today**, in the rebuilt frontend:
+
+- Every icon-only control has an accessible name — the expand toggle is
+  `aria-label="Expand {name}"`, the row actions are `aria-label="Rename {name}"` and
+  `aria-label="Delete {name}"`, and the rename input is labelled.
+- Visible focus is never removed: `button:focus-visible` paints a 3px outline.
+- The delete confirmation is `role="alertdialog"` with `aria-modal` and an accessible name.
+- Status and error text use `role="status"` and `role="alert"`, so an outcome is announced
+  rather than only shown.
+- The tree is `aria-busy` while a mutation is in flight.
 - Contrast as measured in §3.
+
+**What is not true, and is not scheduled:**
+
+- `make a11y` **exists and has never run.** It shells into a Docker container that has never
+  been built (`make up` does not work — D-13) and greps Playwright for `@a11y`, a tag no test
+  in this repository carries. A target that cannot execute is worse than a missing one: it
+  answers "is this checked?" with a file path instead of a result.
+- There is **no axe-core anywhere** in the dependency tree.
+- The tree is the drag library's markup, **not** a `role="tree"` with `role="treeitem"`,
+  `aria-level` and `aria-selected`.
+- There is **no keyboard equivalent for drag-and-drop**. Moving a node requires a pointer.
+  That is a genuine WCAG 2.2 AA failure and it is written here rather than in a checklist
+  nobody runs.
+- There is no live region announcing each mutation by name.
+
+So **the honest target is not AA.** It is "keyboard-reachable controls with accessible names,
+visible focus, and announced errors", which is most of the way there and is what the code does.
+Reaching AA needs the keyboard move path, and that is a task nobody has scheduled.
+
+<details>
+<summary>The original section, as written on 2026-11-13</summary>
+
+> Target: **WCAG 2.2 AA**. This is a testable claim, so it is tested — `make a11y` runs
+> axe-core against the running app in CI, and the Playwright suite drives the tree by keyboard
+> only. A target that is not checked is not kept.
+>
+> - The tree is a real `role="tree"` with `role="treeitem"`, `aria-expanded`, `aria-level`,
+>   `aria-selected`. Arrow keys navigate, Right/Left expand and collapse, Enter renames,
+>   Delete removes, Escape cancels.
+> - **Drag-and-drop has a keyboard equivalent.** Cut-and-paste style: select, `Ctrl/Cmd+X`,
+>   navigate to destination, `Ctrl/Cmd+V`. Drag-only is a failure at AA.
+> - Every icon-only control has an accessible name. Folder and file are distinguished by icon
+>   *and* by an `aria-label`, never by colour.
+> - Visible focus on every interactive element, never `outline: none` without a replacement.
+> - Live region announces the outcome of each mutation ("Moved Reports into Archive").
+> - Contrast as measured in §3.
+
+*"A target that is not checked is not kept" was the one sentence in it that turned out to be
+exactly right.*
+
+</details>
 
 ---
 
@@ -220,8 +264,11 @@ only. A target that is not checked is not kept.
 - [ ] Every colour, space, radius and duration came from a token.
 - [ ] Hover, focus-visible, active, disabled and loading all handled.
 - [ ] Loading, empty and error states exist for anything that fetches.
-- [ ] Keyboard path works end to end, including moving a node.
+- [ ] ~~Keyboard path works end to end, including moving a node.~~ **Cut, D-23** — there is no
+      keyboard move path. Reinstate this line with the feature, not before.
 - [ ] Meaning is never carried by colour alone.
 - [ ] Checked at 640px and at 1200px; no horizontal page scroll.
 - [ ] Both themes checked, including the un-stamped system-default state.
-- [ ] `make a11y` passes.
+- [ ] ~~`make a11y` passes.~~ **Cut, D-23** — the target exists but cannot run: it needs a
+      container that has never been built and greps for a test tag nothing carries. A checklist
+      item that cannot be performed makes every other item on the list look optional.

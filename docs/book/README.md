@@ -19,7 +19,7 @@ A chapter exists once it has something true to say. The table below lists all tw
 each is written — **a missing file means that milestone has not landed yet**, not that the
 chapter was forgotten. Empty placeholder files are worse than absent ones.
 
-Nine of twenty are written. Every claim in them is either forensics on code that shipped in
+Eleven of twenty are written. Every claim in them is either forensics on code that shipped in
 April 2025, or a statement about code in this repository that names the test proving it.
 
 ---
@@ -55,8 +55,8 @@ How each failure is actually fixed, and why the obvious fix is not always enough
 | 9 | [Recursive CTEs](09-recursive-ctes.md) | **written** |
 | 10 | [The race nobody sees](10-the-race-nobody-sees.md) | **written** |
 | 11 | [The API contract](11-the-api-contract.md) | **written** |
-| 12 | [Identity and isolation](12-identity-and-isolation.md) | M5 |
-| 13 | Making it fast | M6 |
+| 12 | [Identity and isolation](12-identity-and-isolation.md) | **written** |
+| 13 | [The client that could not say null](13-the-client-that-could-not-say-null.md) | **written** |
 
 ## Volume IV · The Practice
 
