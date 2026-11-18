@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DndProvider } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { Tree, type DropOptions, type NodeModel } from "@minoru/react-dnd-treeview";
 import { ApiError } from "../api/client";
-import { deleteNode, listChildren, listRoots, moveNode, renameNode } from "../api/nodes";
+import { createNode, deleteNode, listChildren, listRoots, moveNode, renameNode } from "../api/nodes";
 import { ROOT_ID, mergeNodes, subtreeIds, toParentId, toTreeNode, type NodeData } from "./model";
 
 type Tn = NodeModel<NodeData>;
@@ -52,19 +52,22 @@ export function Explorer() {
   const [nodes, setNodes] = useState<Tn[]>([]);
   const [loaded, setLoaded] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState<Tn | null>(null);
   const [draft, setDraft] = useState("");
   const [confirming, setConfirming] = useState<Tn | null>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
 
   const report = useCallback((e: unknown) => {
+    setNotice(null);
     setError(e instanceof ApiError ? e.message : "The request did not reach the server.");
   }, []);
 
   const loadRoots = useCallback(async () => {
     try {
-      const page = await listRoots();
-      setNodes((current) => mergeNodes(current, (page.items ?? []).map(toTreeNode)));
+      const items = await listRoots();
+      setNodes((current) => mergeNodes(current, items.map(toTreeNode)));
       setError(null);
     } catch (e: unknown) {
       report(e);
@@ -74,6 +77,12 @@ export function Explorer() {
   useEffect(() => {
     void loadRoots();
   }, [loadRoots]);
+
+  // Move focus into the confirmation when it opens. Without this a keyboard
+  // user tabs straight past Delete and Cancel back into the row buttons.
+  useEffect(() => {
+    if (confirming !== null) confirmRef.current?.focus();
+  }, [confirming]);
 
   /**
    * Children load when a folder is first opened, through `onChangeOpen` --
@@ -87,10 +96,14 @@ export function Explorer() {
       for (const id of openIds) {
         const numeric = typeof id === "number" ? id : Number(id);
         if (loaded.has(numeric)) continue;
-        setLoaded((current) => new Set(current).add(numeric));
         try {
-          const page = await listChildren(numeric);
-          setNodes((current) => mergeNodes(current, (page.items ?? []).map(toTreeNode)));
+          const items = await listChildren(numeric);
+          setNodes((current) => mergeNodes(current, items.map(toTreeNode)));
+          // Marked loaded only after the request succeeds. Marking it first
+          // meant one 503 left the folder permanently empty for the session:
+          // `loaded` is the guard against re-fetching, so a failed load looked
+          // exactly like a folder with no children, for ever.
+          setLoaded((current) => new Set(current).add(numeric));
           setError(null);
         } catch (e: unknown) {
           report(e);
@@ -104,7 +117,14 @@ export function Explorer() {
    * After every mutation the affected parents are reloaded rather than patched
    * in place. D-23 dropped optimistic updates on purpose: their failure mode
    * is showing a tree the server does not have, which is the same class of bug
-   * this project is named after. A refetch is slower and cannot lie.
+   * this project is named after.
+   *
+   * A refetch is slower, and it only cannot lie if it sees everything. The
+   * first version of this comment said "cannot lie" while nothing in the
+   * client read `next_cursor` and the server pages at fifty -- so with fifty
+   * roots sorting before it, a node moved to the root would have stayed drawn
+   * inside the folder it had just left. `listRoots` and `listChildren` follow
+   * pages now, which is what makes the claim true rather than hopeful.
    */
   const reload = useCallback(
     async (parents: (number | null)[]) => {
@@ -112,8 +132,8 @@ export function Explorer() {
       for (const parent of parents) {
         if (parent === null) continue;
         try {
-          const page = await listChildren(parent);
-          setNodes((current) => mergeNodes(current, (page.items ?? []).map(toTreeNode)));
+          const items = await listChildren(parent);
+          setNodes((current) => mergeNodes(current, items.map(toTreeNode)));
         } catch (e: unknown) {
           report(e);
         }
@@ -184,8 +204,27 @@ export function Explorer() {
       setConfirming(null);
       await reload([parent]);
       if ((result.deleted ?? 0) > 1) {
-        setError(`Deleted ${String(result.deleted)} items.`);
+        // Through the notice channel, not `setError`. It was announced with
+        // role="alert" in red, which tells a screen-reader user that deleting
+        // the thing they asked to delete went wrong.
+        setNotice(`Deleted ${String(result.deleted)} items.`);
       }
+    } catch (e: unknown) {
+      report(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Create a folder at the root. The only way to add anything to the tree. */
+  const addFolder = async () => {
+    const name = window.prompt("Name for the new folder");
+    if (name === null || name.trim() === "") return;
+    setBusy(true);
+    try {
+      await createNode(name.trim(), "folder", null);
+      setError(null);
+      await loadRoots();
     } catch (e: unknown) {
       report(e);
     } finally {
@@ -202,6 +241,17 @@ export function Explorer() {
           {error}
         </p>
       )}
+      {notice !== null && (
+        <p className="note ok" role="status">
+          {notice}
+        </p>
+      )}
+
+      <p className="toolbar">
+        <button type="button" onClick={() => void addFolder()} disabled={busy}>
+          New folder
+        </button>
+      </p>
 
       <DndProvider backend={HTML5Backend}>
         <Tree<NodeData>
@@ -274,8 +324,20 @@ export function Explorer() {
         exists now, so the question is no longer "what happens to the
         children" but "do you know how many there are".
       */}
+      {/*
+        `role="alertdialog"` without `aria-modal`. The attribute tells assistive
+        technology the rest of the page is inert -- and it is not: there is no
+        focus trap here and the tree behind stays reachable. Claiming modality
+        that does not exist is worse for a screen-reader user than omitting it,
+        because content they can still reach is hidden from them. Focus moves
+        to the destructive button on open and Escape cancels, which is the part
+        that is actually implemented.
+      */}
       {confirming !== null && (
-        <div className="confirm" role="alertdialog" aria-modal="true" aria-label="Confirm delete">
+        <div className="confirm" role="alertdialog" aria-label="Confirm delete"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setConfirming(null);
+          }}>
           <p>
             Delete <strong>{confirming.text}</strong>
             {descendantCount > 0 && (
@@ -288,7 +350,7 @@ export function Explorer() {
             ?
           </p>
           <p className="muted">This cannot be undone.</p>
-          <button type="button" onClick={() => void commitDelete()} disabled={busy}>
+          <button type="button" ref={confirmRef} onClick={() => void commitDelete()} disabled={busy}>
             Delete
           </button>
           <button type="button" className="ghost" onClick={() => setConfirming(null)}>

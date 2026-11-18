@@ -9,7 +9,7 @@ WEB := $(COMPOSE) exec -T web
 .DEFAULT_GOAL := help
 .PHONY: help db up down restart logs ps shell-api shell-db \
         migrate revision test-api test-web test-e2e test \
-        lint format typecheck openapi guards a11y ci clean
+        lint format typecheck openapi openapi-containers guards a11y ci clean
 
 # apps/ arrives with the subtree graft. Until then, fail with a useful message
 # instead of a confusing build error.
@@ -103,7 +103,21 @@ typecheck: ## mypy and tsc
 	$(API) mypy src
 	$(WEB) npx tsc --noEmit
 
-openapi: ## Regenerate the OpenAPI document and the web client types
+openapi: ## NOT USABLE HERE - CI regenerates and diffs the document
+	@echo ""
+	@echo "  This target shells into containers that have never been built."
+	@echo "  It is the same defect make a11y was rewritten for."
+	@echo ""
+	@echo "  CI does this properly: the migrations job regenerates the"
+	@echo "  document from the Flask app, and the web job runs"
+	@echo "  'npm run api-types' and fails on any diff. Both are gates."
+	@echo ""
+	@echo "  To regenerate the client types without Docker:"
+	@echo "      cd apps/web && npm run api-types"
+	@echo ""
+	@exit 1
+
+openapi-containers: ## The container version, for when make up works
 	$(need-apps)
 	$(API) python -m file_explorer.cli openapi > apps/api/docs/openapi.json
 	$(WEB) npx openapi-typescript ../api/docs/openapi.json -o src/api/schema.d.ts

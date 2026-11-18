@@ -1,12 +1,18 @@
 import { ApiError, request, setCsrfToken } from "./client";
 // Through `contract`, not `schema`: one door, and the door is the file that
 // asserts the generated types still mean what this application needs.
-import type { Credentials, Session, WhoAmI } from "./contract";
+import type { Session, WhoAmI } from "./contract";
 
 export type { WhoAmI };
 
 /**
- * Sign-in, sign-up, guest and sign-out.
+ * Guest sign-in, and sign-out.
+ *
+ * There is deliberately no `signIn` or `register` here. D-24 chose the
+ * one-click guest session *over* a form: an interviewer with thirty seconds
+ * will not sign up, and a shared demo account with printed credentials is one
+ * password for every visitor. Shipping a `signIn` nothing can reach would be
+ * the dead-code finding (F-15) this milestone just closed, in a new file.
  *
  * Every one of these sets or clears the in-memory CSRF token as part of the
  * same call that changes the session, because the two are one fact. Leaving
@@ -17,13 +23,6 @@ export type { WhoAmI };
 function adopt(session: Session): Session {
   setCsrfToken(session.csrf_token ?? null);
   return session;
-}
-
-export async function signIn(credentials: Credentials): Promise<Session> {
-  return adopt(await request<Session>("/api/v1/auth/login", {
-    method: "POST",
-    body: credentials,
-  }));
 }
 
 /**
@@ -38,20 +37,6 @@ export async function signIn(credentials: Credentials): Promise<Session> {
  */
 export async function signInAsGuest(): Promise<Session> {
   return adopt(await request<Session>("/api/v1/auth/guest", { method: "POST" }));
-}
-
-/**
- * Registration answers 202 whether or not the address was taken, so there is
- * nothing to branch on and nothing to report back about the address. A
- * different answer for a taken address is an account-existence oracle
- * available to anyone, which is the thing the whole auth surface is shaped to
- * avoid.
- */
-export async function register(credentials: Credentials): Promise<void> {
-  await request<{ accepted?: boolean }>("/api/v1/auth/register", {
-    method: "POST",
-    body: credentials,
-  });
 }
 
 export async function signOut(): Promise<void> {

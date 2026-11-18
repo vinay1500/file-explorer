@@ -38,6 +38,12 @@ on. The numbers in §3 are measured, not estimated.
 
 ---
 
+> **§3 describes a file that does not exist.** `src/styles/tokens.css` was never written, and
+> the colours the application actually ships are a short block at the top of
+> `apps/web/src/index.css` with different values. The ratios below are real arithmetic on the
+> palette *specified* here, and they say nothing about what a visitor sees. Kept as the target,
+> marked so nobody quotes it as a measurement of the running app.
+
 ## 3. Colour tokens
 
 Defined once in `src/styles/tokens.css` on `:root`, redefined for dark under both
@@ -214,7 +220,10 @@ the state change.
 - Status and error text use `role="status"` and `role="alert"`, so an outcome is announced
   rather than only shown.
 - The tree is `aria-busy` while a mutation is in flight.
-- Contrast as measured in §3.
+- ~~Contrast as measured in §3.~~ **Cut, D-23** — §3 publishes ratios for a palette the
+  application does not use, and the `src/styles/tokens.css` it describes does not exist.
+  The colours actually shipped are a short block at the top of `apps/web/src/index.css`,
+  and their contrast has not been measured.
 
 **What is not true, and is not scheduled:**
 

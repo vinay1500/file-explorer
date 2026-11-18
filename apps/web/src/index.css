@@ -101,3 +101,6 @@ button:focus-visible {
 .confirm p { margin: 0 0 0.6rem; }
 .confirm button { margin-inline-end: 0.5rem; }
 .confirm .ghost { background: transparent; color: var(--ink); }
+
+.toolbar { margin: 0 0 0.75rem; }
+.toolbar button { font-size: 0.9rem; padding: 0.35rem 0.8rem; }
