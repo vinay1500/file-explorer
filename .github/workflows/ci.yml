@@ -362,6 +362,27 @@ jobs:
       # against nothing that checks it -- the same shape as scheduling a
       # frontend against a deployment that does not exist, which is what D-25
       # had to correct.
+      # The generated client is committed so that an API change shows up in a
+      # pull request diff rather than only at runtime. Regenerating and
+      # diffing is what makes the committed copy trustworthy: without it the
+      # file is a snapshot of whenever somebody last remembered.
+      #
+      # `--exit-code` and not `--quiet`: on failure the diff itself is the
+      # error message, and it names the field that moved.
+      - name: The committed API types match the document
+        run: |
+          npm run api-types
+          if ! git diff --exit-code -- src/api/schema.d.ts; then
+            echo "::error::src/api/schema.d.ts is stale. Run 'npm run api-types' and commit it."
+            exit 1
+          fi
+          echo "  generated types match apps/api/docs/openapi.json"
+
+      # `contract.ts` turns the part that matters into a compile error. Drift
+      # detection alone would let a narrowing through: regenerate, the diff
+      # contains `new_parent_id: number`, and it gets approved by anyone not
+      # looking for it. That narrowing is F-06 -- a client that cannot say
+      # "move this to the root".
       - name: Types
         run: npm run typecheck
 

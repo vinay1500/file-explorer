@@ -67,6 +67,7 @@ every command is proven.
 | 18 | Eight M4 guards removed at once | 8 red | **5 red.** Two of the eight were misapplied by the mutation script itself — one hit the first of two identical lines, the other left a decorator's indentation behind and produced a syntax error | `43727207915` |
 | 19 | The two, reapplied precisely | 2 red | 1 red. The other exposed something else entirely — see below | `43727478366` |
 | 20 | Health exemption removed, against health's own bucket | red | red | `43727642755` |
+| 21 | `new_parent_id` narrowed from `number \| null` to `number` in the generated API types | the web build red | red: `TS2344: Type 'false' does not satisfy the constraint 'true'` | run locally against `tsc 5`, see below |
 
 Rows 8, 10, 17 and 18 are the ones worth reading.
 
@@ -95,3 +96,33 @@ default limits **per endpoint**. The test spent one route's budget and asked
 another, which passes either way. The configured "120 per minute" is per
 endpoint per caller, not a global ceiling, and the configuration now says so.
 That is a fact about the system found by a mutation that failed to fail.
+
+
+## 21 — the first mutation that is not a test
+
+The twenty above all redden a test. This one reddens a **build**, and the
+difference is the point.
+
+`contract.ts` asserts, in the type system, that `null` remains assignable to
+`NodeMove["new_parent_id"]`. There is no test to run: either the file compiles
+or it does not. Narrowing the field to a plain `number` produces
+
+```
+error TS2344: Type 'false' does not satisfy the constraint 'true'.
+```
+
+which is as red as a failing test and arrives earlier.
+
+**Why it is worth asserting at all**, when CI already regenerates the types and
+fails on any diff: drift detection would *catch* the narrowing and then invite
+somebody to approve it. The regenerated file would contain
+`new_parent_id: number`, the diff would be three lines, and it reads as
+tightening a type rather than as deleting a feature. It is F-06 — a client that
+cannot say "move this to the root" — and it is invisible unless you already
+know that is what `null` means here.
+
+This one was verified on a throwaway file rather than a throwaway branch,
+because the assertion is type-level and needs no database, no CI run and no
+application: two three-line files, one narrowed, `tsc --noEmit --strict` on
+each. The cheapest proof in this document, and the record would be worth less
+without it.
