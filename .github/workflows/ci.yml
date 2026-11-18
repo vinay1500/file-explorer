@@ -333,6 +333,108 @@ jobs:
   # enforced by something only a real database does -- cascades, partial unique
   # indexes, recursive CTEs, row locks. A suite that passes on SQLite has
   # tested a different program.
+  locale:
+    name: non-C collation
+    runs-on: ubuntu-latest
+
+    # M1.12, deferred since M1 and the last question left from it.
+    #
+    # Every other job initialises PostgreSQL with `--locale=C`, so the server's
+    # default collation already *is* byte order. Migration 0002 pins
+    # `COLLATE "C"` on every index that orders or compares a name -- and under
+    # a C database that pin is indistinguishable from doing nothing. The suite
+    # cannot tell "ordering is byte order because the indexes are pinned" from
+    # "because the default already was", and a mutation removing the pin would
+    # survive.
+    #
+    # So this job runs the same suite against `en_US.UTF-8` under glibc, where
+    # the default collation is emphatically not byte order. The Debian image
+    # rather than alpine, because musl does not carry the locale.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: fileexplorer
+          POSTGRES_PASSWORD: localdev
+          POSTGRES_DB: file_explorer_locale
+          POSTGRES_INITDB_ARGS: "--locale=en_US.UTF-8 --encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fileexplorer -d file_explorer_locale"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+
+    env:
+      PGPASSWORD: localdev
+      DATABASE_URL: postgresql://fileexplorer:localdev@localhost:5432/file_explorer_locale
+      FLASK_APP: file_explorer.app:create_app
+
+    defaults:
+      run:
+        working-directory: apps/api
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # The job's own premise, checked before anything depends on it.
+      #
+      # If this database turned out to be byte-order by default, every
+      # assertion below would pass for the wrong reason and the job would look
+      # like evidence while being a copy of the one above it. That is the exact
+      # shape of a test that cannot fail, which this project has found fifteen
+      # of -- so the premise fails the build rather than being assumed.
+      - name: This database must NOT be byte-order by default
+        run: |
+          read -r def_order c_order coll <<<"$(psql -h localhost -U fileexplorer \
+            -d file_explorer_locale -At -F' ' -c \
+            "SELECT ('a' < 'B'), ('a' COLLATE \"C\" < 'B' COLLATE \"C\"), datcollate
+             FROM pg_database WHERE datname = current_database();")"
+          echo "  datcollate            : $coll"
+          echo "  'a' < 'B' (default)   : $def_order"
+          echo "  'a' < 'B' COLLATE C   : $c_order"
+          if [ "$def_order" = "$c_order" ]; then
+            echo "::error::this database orders like C, so running the suite here proves nothing"
+            exit 1
+          fi
+          echo "  the default disagrees with byte order, so the pin has work to do"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Migrate
+        # 0002's guard runs for real here: it refuses to pin when rows would
+        # collide under C. On a C database that branch is unreachable.
+        run: flask db upgrade
+
+      - name: Every pinned index really is C, whatever the database default
+        run: |
+          rows=$(psql -h localhost -U fileexplorer -d file_explorer_locale -At -c \
+            "SELECT i.relname
+               FROM pg_index x
+               JOIN pg_class i ON i.oid = x.indexrelid
+               JOIN pg_class t ON t.oid = x.indrelid
+              WHERE t.relname = 'nodes'
+                AND EXISTS (
+                  SELECT 1 FROM unnest(x.indcollation) c
+                   WHERE c <> 0 AND c <> (SELECT oid FROM pg_collation WHERE collname = 'C')
+                );")
+          if [ -n "$rows" ]; then
+            echo "::error::these name indexes picked up the database collation instead of C:"
+            echo "$rows"
+            exit 1
+          fi
+          echo "  every collated index on nodes is C"
+
+      - name: The suite, against a database that does not sort like C
+        run: pytest -m "not concurrency" -q
+
   web:
     name: web build and types
     runs-on: ubuntu-latest
