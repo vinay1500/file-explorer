@@ -211,8 +211,18 @@ def test_moving_a_folder_into_its_own_descendant_returns_409(client: FlaskClient
 
     # And the tree is untouched. A 409 that still moved the node would pass
     # every assertion above, which is the vacuous shape M4 found five of.
-    after = _problem(client.get(f"/api/v1/nodes/{root['id']}"))
-    assert after["parent_id"] is None, "the move was refused and happened anyway"
+    #
+    # Read back through `/roots` rather than `/nodes/{id}`: there is no
+    # read-one-node route, only PATCH and DELETE on that path. Writing this
+    # test is how I found that out -- the first version asked for the node and
+    # got a 405 problem document, which parsed fine and simply had no
+    # `parent_id` in it. A node moved under `leaf` would stop being a root, so
+    # this is the stronger assertion anyway.
+    roots = _problem(client.get("/api/v1/roots"))
+    assert isinstance(roots["items"], list)
+    still_a_root = [n for n in roots["items"] if n["id"] == root["id"]]
+    assert still_a_root, "the move was refused and happened anyway: the folder left the root"
+    assert still_a_root[0]["parent_id"] is None
 
 
 @pytest.mark.invariant
