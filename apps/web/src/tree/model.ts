@@ -21,8 +21,19 @@ export interface NodeData {
 /** API node -> library node. `parent_id: null` becomes `ROOT_ID`. */
 export function toTreeNode(node: Node): NodeModel<NodeData> {
   const type = node.type === "folder" ? "folder" : "file";
+  // `Node.id` is optional in the generated types because the document marks
+  // no field required, so TypeScript demands a fallback here. It used to be
+  // `?? 0` -- and `0` is `ROOT_ID`, the sentinel this entire file exists to
+  // manage, so a node that arrived without an id would have *become the
+  // root*. The line below it, `parent_id ?? ROOT_ID`, is correct and reads
+  // identically, which is what made it easy to miss.
+  //
+  // A node without an id is a malformed response, not a state to render.
+  if (node.id === undefined) {
+    throw new Error(`the API returned a node with no id: ${JSON.stringify(node)}`);
+  }
   return {
-    id: node.id ?? 0,
+    id: node.id,
     parent: node.parent_id ?? ROOT_ID,
     text: node.name ?? "",
     // `droppable` is what the library's own rules use to refuse a file as a

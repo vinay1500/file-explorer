@@ -500,25 +500,32 @@ jobs:
       # what the April 2025 client did and it is why it could never have signed
       # in. The build output is the place to catch it, because a relative URL
       # and an absolute one look identical in review.
-      # Production dependencies only, and it fails the build. Everything the
-      # browser is served has to be clean, and today it is: zero advisories.
-      #
-      # Dev dependencies are reported separately and do NOT fail, because as of
-      # 18 November the tree carries ten high-severity advisories that all
-      # reduce to one unfixable cause -- a ReDoS in `picomatch`, reached
-      # through `fdir` and `tinyglobby` by both Vite and typescript-eslint.
-      # 4.0.7 is the latest published version and the advisory covers <= 4.0.7,
-      # so there is nothing to upgrade to. npm's own suggested remedy is to
-      # DOWNGRADE Vite to 6.2.7, which would pull an older picomatch and fix
-      # nothing.
-      #
-      # Failing on that would make this step permanently red, and a permanently
-      # red check is one nobody reads. Reporting it keeps the information
-      # visible without destroying the signal from the line above.
+      # Everything the browser is served has to be clean, and it is.
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Audit dev dependencies (report only)
+      # Dev dependencies fail on CRITICAL and report everything else, which is
+      # a real gate rather than a formality: the count is zero right now.
+      #
+      # An earlier version of this step was `npm audit || true` with a comment
+      # claiming every dev advisory "reduces to one unfixable cause, a ReDoS in
+      # picomatch". That was true when it was written and stopped being true
+      # the moment M6.6 added Vitest: the tree then carried **two criticals**
+      # that are not picomatch -- a prototype-pollution RCE in `tinypool` and a
+      # path traversal in `@vitest/mocker` -- both fixed by `vitest@4`, and the
+      # `|| true` guaranteed nobody would ever find out. A justification that
+      # ages into a falsehood is worse than no justification, because it stops
+      # anyone looking again.
+      #
+      # The eleven remaining highs genuinely are the picomatch chain, reached
+      # through `fdir` and `tinyglobby` by Vite and typescript-eslint. 4.0.7 is
+      # the latest published version and the advisory covers <= 4.0.7, so there
+      # is nothing to upgrade to; npm's suggested remedy is to DOWNGRADE Vite,
+      # which would pull an older picomatch and fix nothing.
+      - name: Audit dev dependencies
+        run: npm audit --audit-level=critical
+
+      - name: Dev advisories, for the record
         run: npm audit || true
 
       - name: Unit tests
@@ -545,6 +552,11 @@ jobs:
 
       - name: No API hostname is baked into the bundle
         run: |
+          # Without this, a missing `dist` makes grep error, `hits` empty, and
+          # the step print "clean" and exit 0 -- a guard that passes because
+          # there was nothing to guard. It is correct today only because the
+          # Build step happens to run first.
+          test -d dist || { echo "::error::there is no dist/ to check"; exit 1; }
           hits=$(grep -rlE 'https?://[a-z0-9.-]*onrender\.com' dist 2>/dev/null || true)
           if [ -n "$hits" ]; then
             echo "::error::the API hostname is compiled into the bundle, which bypasses the rewrite"

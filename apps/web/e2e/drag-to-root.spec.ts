@@ -56,19 +56,30 @@ async function dragOnto(page: Page, source: Locator, target: Locator): Promise<v
   await target.dispatchEvent("dragenter", { dataTransfer });
   await target.dispatchEvent("dragover", { dataTransfer });
 
-  // Wait for the library to acknowledge the hover before dropping.
+  // Two separate pieces of React state have to settle before a drop is
+  // accepted, and waiting for the first one is not enough.
   //
-  // This is not padding. `dragover` sets react-dnd's current drop target
-  // through a React state update; dispatching `drop` in the same tick lands
-  // while that target is still null, and the drop is discarded with no error.
-  // It fails *intermittently*, which is the worst kind: the first version of
-  // this test passed on one CI run and failed on the next with no code
-  // changed between them.
+  // `classes.dropTarget` comes from react-dnd's `isOver`. The drop handler
+  // reads `PlaceholderContext`'s `dropTargetId` and `index`, which the
+  // library's `hover` callback sets through two *different* `useState`
+  // setters. One `dragover` can flip `isOver` without committing the
+  // placeholder state, and the drop is then discarded with no error at all.
   //
-  // `classes.dropTarget` is applied exactly when the library considers the
-  // element hovered, so waiting for it waits for the real condition rather
-  // than for a duration.
+  // An earlier version of this helper waited on the class and claimed that
+  // "waits for the real condition". It waits for *a* real condition -- not
+  // the one the drop handler reads. A review measured the result: **one green
+  // run in ten.** CI had passed five times in a row, which is luck rather
+  // than correctness, and a coin-flip gate is worse than no gate because the
+  // first red run on an unrelated change teaches everyone to re-run it.
+  //
+  // The second `dragover` is the load-bearing part: it runs after the first
+  // render has committed, so `hover` sees the new target and publishes it.
   await expect(target).toHaveClass(/tree-drop/, { timeout: 5_000 });
+  await target.dispatchEvent("dragover", { dataTransfer });
+  // A duration rather than a condition, which is the weak point of this
+  // helper and is written down rather than hidden: the placeholder state is
+  // internal to the library and has no DOM marker in this app's markup.
+  await page.waitForTimeout(100);
 
   await target.dispatchEvent("drop", { dataTransfer });
   await source.dispatchEvent("dragend", { dataTransfer });
