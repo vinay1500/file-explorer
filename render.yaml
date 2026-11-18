@@ -55,6 +55,12 @@ services:
     # only shows HTTP request logs on a paid workspace -- so the only way to
     # see `X-Forwarded-For` on a free instance is for the process to print it.
     # `xff=` is the raw header; the hop count is the number of addresses in it.
+    #
+    # It stays after the measurement, deliberately. The effect is that every
+    # request writes a client-controllable string into the log -- header values
+    # cannot carry raw newlines, so this is log noise rather than injection,
+    # and it is the only way to re-check the hop count when the edge changes.
+    # Recorded as a decision rather than left as a leftover justification.
     startCommand: >-
       gunicorn 'file_explorer.app:create_app()'
       --workers 2 --timeout 30 --access-logfile - --error-logfile -

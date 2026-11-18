@@ -18,7 +18,7 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # The probe and the browser must point at the same service. They are
       # configured in two different places -- a repository variable and a
@@ -26,35 +26,51 @@ jobs:
       # been green against a service the frontend never calls. Render appends a
       # random suffix when a subdomain is taken, which is exactly the kind of
       # difference nobody notices by eye.
-      - name: The probe and the rewrite must name the same host
+      # Resolve the host to probe, and FAIL when it cannot be resolved.
+      #
+      # This step used to `exit 0` when `API_URL` was unset. So did the probe
+      # below it, which meant the whole workflow was green whenever the
+      # repository variable was absent, renamed, or scoped elsewhere -- and a
+      # repository variable is exactly the kind of out-of-tree configuration
+      # that disappears without a commit. A check that passes because it did
+      # nothing is the failure this workflow exists to catch, one level up,
+      # and chapter 7 of the book declares that failure closed.
+      #
+      # `vercel.json` is committed and names the same host, so there is a
+      # fallback with no secret in it. If both are missing the job goes red,
+      # which is the honest answer to "is anything being watched?".
+      - name: Resolve the host to probe
+        id: host
         env:
           API_URL: ${{ vars.API_URL }}
         run: |
-          if [ -z "$API_URL" ]; then
-            echo "::notice::API_URL is not set, so there is nothing to cross-check yet."
-            exit 0
-          fi
           rewrite=$(grep -o '"destination": "https://[^/"]*' vercel.json | sed 's|.*//||')
           probe=${API_URL#http://}
           probe=${probe#https://}
           probe=${probe%%/*}
-          if [ "$rewrite" != "$probe" ]; then
+
+          if [ -z "$probe" ] && [ -z "$rewrite" ]; then
+            echo "::error::neither the API_URL variable nor vercel.json names a host to probe"
+            exit 1
+          fi
+
+          if [ -z "$probe" ]; then
+            echo "::warning::API_URL is not set; falling back to the host committed in vercel.json"
+            probe="$rewrite"
+          elif [ "$probe" != "$rewrite" ]; then
             echo "::error::API_URL names '$probe' and vercel.json rewrites to '$rewrite'."
             echo "The probe and the browser are pointed at different services."
             exit 1
+          else
+            echo "  both name $probe"
           fi
-          echo "  both name $probe"
+
+          echo "url=https://$probe" >> "$GITHUB_OUTPUT"
 
       - name: Probe the API's readiness endpoint
         env:
-          API_URL: ${{ vars.API_URL }}
+          API_URL: ${{ steps.host.outputs.url }}
         run: |
-          if [ -z "$API_URL" ]; then
-            echo "::notice::API_URL is not set, so there is nothing deployed to probe yet."
-            echo "Set it as a repository variable when the demo goes up."
-            exit 0
-          fi
-
           # --max-time 120 because a free instance can take most of a minute to
           # wake. A timeout here is a real failure, not a false alarm.
           code=$(curl -s -o /tmp/body -w '%{http_code}' --max-time 120 \

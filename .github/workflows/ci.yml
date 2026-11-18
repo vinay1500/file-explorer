@@ -340,15 +340,25 @@ jobs:
     # M1.12, deferred since M1 and the last question left from it.
     #
     # Every other job initialises PostgreSQL with `--locale=C`, so the server's
-    # default collation already *is* byte order. Migration 0002 pins
-    # `COLLATE "C"` on every index that orders or compares a name -- and under
-    # a C database that pin is indistinguishable from doing nothing. The suite
-    # cannot tell "ordering is byte order because the indexes are pinned" from
-    # "because the default already was", and a mutation removing the pin would
-    # survive.
+    # default collation already *is* byte order.
+    #
+    # An earlier version of this comment claimed a mutation removing the
+    # `COLLATE "C"` pin would survive there. **That is false**, and the
+    # repository's own record says so: `docs/MUTATIONS.md` row 10 unpinned the
+    # index collation under `--locale=C` and reports "only the `pg_index` test
+    # red". `test_the_name_indexes_pin_their_collation` catches it anywhere,
+    # because an unpinned text index records `pg_catalog."default"` rather than
+    # `C` whatever the server default happens to be.
+    #
+    # What a C database genuinely cannot test is everything *downstream* of the
+    # pin: the `COLLATE "C"` in the repository's own comparisons and ORDER BY
+    # clauses, and whether a keyset cursor still agrees with the index it pages
+    # through when the server would otherwise sort differently. Row 10 records
+    # exactly that -- "the ordering test passed, because CI runs `--locale=C`".
     #
     # So this job runs the same suite against `en_US.UTF-8` under glibc, where
-    # the default collation is emphatically not byte order. The Debian image
+    # the default collation is emphatically not byte order, and the ordering
+    # assertions finally have something to disagree with. The Debian image
     # rather than alpine, because musl does not carry the locale.
     services:
       postgres:
@@ -409,28 +419,18 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Migrate
-        # 0002's guard runs for real here: it refuses to pin when rows would
-        # collide under C. On a C database that branch is unreachable.
+        # Note: 0002's duplicate-check branch is NOT exercised here. It needs
+        # rows that collide under C and not under the server default, and this
+        # container is empty -- the migration runs immediately after 0001
+        # creates the table. The branch is unreachable because `nodes` has no
+        # rows, not because of the locale. An earlier comment claimed
+        # otherwise.
         run: flask db upgrade
 
-      - name: Every pinned index really is C, whatever the database default
-        run: |
-          rows=$(psql -h localhost -U fileexplorer -d file_explorer_locale -At -c \
-            "SELECT i.relname
-               FROM pg_index x
-               JOIN pg_class i ON i.oid = x.indexrelid
-               JOIN pg_class t ON t.oid = x.indrelid
-              WHERE t.relname = 'nodes'
-                AND EXISTS (
-                  SELECT 1 FROM unnest(x.indcollation) c
-                   WHERE c <> 0 AND c <> (SELECT oid FROM pg_collation WHERE collname = 'C')
-                );")
-          if [ -n "$rows" ]; then
-            echo "::error::these name indexes picked up the database collation instead of C:"
-            echo "$rows"
-            exit 1
-          fi
-          echo "  every collated index on nodes is C"
+      # There is deliberately no psql step asserting the indexes are C.
+      # `test_the_name_indexes_pin_their_collation` does exactly that, in the
+      # step below, against this same database -- and a second copy in shell
+      # would be one more thing to keep in step with the first.
 
       - name: The suite, against a database that does not sort like C
         run: pytest -m "not concurrency" -q

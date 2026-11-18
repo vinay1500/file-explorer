@@ -151,6 +151,45 @@ CUT_CLAIMS = {
 CUT_MARKERS = ("~~", "Claim cut", "claim cut", "not delivered", "cut rather than")
 
 
+def _unmarked_claims(text: str) -> list[tuple[str, str]]:
+    """Lines that name a cut claim without saying it was cut.
+
+    A function rather than a loop inside the test, because the test that
+    proves this can fail has to be able to *call* it. The first version of
+    that proof built two strings and asserted properties of the strings it had
+    just built -- it would have stayed green with the guard deleted, which is
+    the shape `docs/MUTATIONS.md` opens by warning about.
+    """
+    found: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        for claim in CUT_CLAIMS:
+            if claim in line and not any(marker in line for marker in CUT_MARKERS):
+                found.append((claim, line))
+    return found
+
+
+@pytest.mark.invariant
+def test_the_cut_claims_still_have_a_subject() -> None:
+    """The guard below is vacuous if nothing mentions the claim at all.
+
+    `structlog` appears in exactly one committed document. If that row were
+    deleted rather than struck through, every parametrised run of the guard
+    would iterate zero lines and pass -- and the cut would stop being
+    *recorded*, which is the whole point of striking it through instead of
+    removing it.
+    """
+    mentions = {
+        claim: sum(claim in doc.read_text(encoding="utf-8") for doc in DOCS)
+        for claim in CUT_CLAIMS
+    }
+    missing = [claim for claim, count in mentions.items() if count == 0]
+    assert not missing, (
+        f"no committed document mentions {missing} any more, so the guard that keeps it marked "
+        f"as cut has nothing to check. Restore the struck-through row or drop it from CUT_CLAIMS "
+        f"deliberately."
+    )
+
+
 @pytest.mark.invariant
 @pytest.mark.parametrize("doc", DOCS, ids=lambda p: p.name)
 def test_no_document_still_advertises_a_claim_that_was_cut(doc: Path) -> None:
@@ -166,35 +205,33 @@ def test_no_document_still_advertises_a_claim_that_was_cut(doc: Path) -> None:
     *not* claimable over the same period. Two committed artefacts, opposite
     stories, and nothing compared them.
     """
-    text = doc.read_text(encoding="utf-8")
-    for claim, why in sorted(CUT_CLAIMS.items()):
-        for line in text.splitlines():
-            if claim not in line:
-                continue
-            assert any(marker in line for marker in CUT_MARKERS), (
-                f"{doc.name} still presents {claim!r} as delivered ({why}). Strike it through or "
-                f"say it was cut, or a reviewer reads the row as a feature that exists."
-            )
+    offences = _unmarked_claims(doc.read_text(encoding="utf-8"))
+    assert not offences, (
+        f"{doc.name} still presents these as delivered: "
+        f"{[claim for claim, _ in offences]}. Strike them through or say they were cut, or a "
+        f"reviewer reads the row as a feature that exists."
+    )
 
 
 @pytest.mark.invariant
-def test_the_cut_claim_guard_would_notice(tmp_path: Path) -> None:
-    """The guard above passes trivially if the claim is simply absent.
+def test_the_cut_claim_guard_would_notice() -> None:
+    """Proof the guard can fail -- by running it, not by restating it.
 
-    So this proves it can fail: the same check, against a line that names a cut
-    claim with no marker on it. Without this, deleting every mention of
-    `structlog` would leave a green test that asserts nothing -- which is the
-    vacuous shape M4 found five of.
+    The first version of this test built two strings and asserted properties
+    of the strings it had just built. It never called the guard, so deleting
+    the guard entirely would have left it green: a test that reaches past the
+    thing it is testing, written inside the file that exists to stop exactly
+    that. Found by a review gate.
     """
     claim = next(iter(CUT_CLAIMS))
     unmarked = f"| Logging | Flask default | **{claim}**, JSON, request-id bound | |"
-    assert claim in unmarked
-    assert not any(marker in unmarked for marker in CUT_MARKERS), (
-        "the fixture line is already marked as cut, so this test cannot fail"
-    )
     marked = f"| Logging | Flask default | ~~{claim}~~ -> stdlib logging | Claim cut |"
-    assert any(marker in marked for marker in CUT_MARKERS), (
-        "a correctly marked line is being read as an unmarked claim"
+
+    assert _unmarked_claims(unmarked) == [(claim, unmarked)], (
+        "the guard did not flag a line that names a cut claim with no marker on it"
+    )
+    assert _unmarked_claims(marked) == [], (
+        "the guard flagged a line that is correctly marked as cut"
     )
 
 
