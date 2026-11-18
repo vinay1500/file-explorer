@@ -199,9 +199,7 @@ def test_moving_a_folder_into_its_own_descendant_returns_409(client: FlaskClient
         )
     )
 
-    response = client.post(
-        f"/api/v1/nodes/{root['id']}/move", json={"new_parent_id": leaf["id"]}
-    )
+    response = client.post(f"/api/v1/nodes/{root['id']}/move", json={"new_parent_id": leaf["id"]})
 
     assert response.status_code == 409, response.get_data(as_text=True)
     body = _problem(response)
