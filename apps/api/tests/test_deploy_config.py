@@ -118,6 +118,31 @@ def test_the_hop_count_can_actually_be_measured() -> None:
 
 
 @pytest.mark.invariant
+def test_the_rewrite_points_at_the_service_this_repository_declares() -> None:
+    """Two files, one deployment, and nothing was checking they agreed.
+
+    `vercel.json` rewrote `/api/*` to `file-explorer-backend.onrender.com` --
+    the name of the *old* service, the one whose database had been gone for
+    seventeen months (F-24). `render.yaml` declares `file-explorer-api`. Both
+    files were committed, both read as the truth, and the browser would have
+    reached a host this repository never deploys to.
+
+    This is F-23's other half: committing the deployment is only worth
+    something if the committed files cannot quietly disagree. The service name
+    is the one string that has to appear in both.
+    """
+    text = RENDER.read_text(encoding="utf-8")
+    service = re.search(r"^\s*-\s*type:\s*web\s*$\n\s*name:\s*(\S+)", text, re.M)
+    assert service, "render.yaml declares no web service name"
+    name = service.group(1)
+    rewrite = VERCEL.read_text(encoding="utf-8")
+    assert f"{name}.onrender.com" in rewrite, (
+        f"render.yaml deploys {name!r} and vercel.json rewrites somewhere else, so the frontend "
+        "would call a host nothing in this repository deploys to"
+    )
+
+
+@pytest.mark.invariant
 def test_no_secret_is_committed_with_a_value() -> None:
     """A connection string in a public repository is a published credential.
 
