@@ -168,6 +168,62 @@ def test_a_domain_error_carries_its_code_and_status(client: FlaskClient) -> None
 
 
 @pytest.mark.invariant
+def test_moving_a_folder_into_its_own_descendant_returns_409(client: FlaskClient) -> None:
+    """The headline invariant, asserted where a client actually meets it.
+
+    Three things claimed this was covered and none of them was the whole
+    claim. `test_move_into_distant_descendant_rejected` drives the *service*
+    and asserts the parent did not change. `test_a_self_parent_violation_maps_
+    to_a_cycle` asserts `CycleDetected.status == 409`, but only for a node
+    moved into *itself*. Nothing drove a **distant descendant** move through
+    HTTP and looked at the status line.
+
+    So the definition-of-done box reading "moving a folder into its own
+    descendant returns 409" was assembled from two tests and a class
+    attribute. It is the one sentence an interviewer is most likely to check,
+    and it was the sentence with no single test behind it.
+    """
+    root = _problem(
+        client.post("/api/v1/nodes", json={"name": "projects", "type": "folder", "parent_id": None})
+    )
+    middle = _problem(
+        client.post(
+            "/api/v1/nodes",
+            json={"name": "2026", "type": "folder", "parent_id": root["id"]},
+        )
+    )
+    leaf = _problem(
+        client.post(
+            "/api/v1/nodes",
+            json={"name": "november", "type": "folder", "parent_id": middle["id"]},
+        )
+    )
+
+    response = client.post(f"/api/v1/nodes/{root['id']}/move", json={"new_parent_id": leaf["id"]})
+
+    assert response.status_code == 409, response.get_data(as_text=True)
+    body = _problem(response)
+    assert body["code"] == "CYCLE_DETECTED"
+    assert body["type"].endswith("#cycle_detected")  # type: ignore[union-attr]
+    assert response.content_type == "application/problem+json"
+
+    # And the tree is untouched. A 409 that still moved the node would pass
+    # every assertion above, which is the vacuous shape M4 found five of.
+    #
+    # Read back through `/roots` rather than `/nodes/{id}`: there is no
+    # read-one-node route, only PATCH and DELETE on that path. Writing this
+    # test is how I found that out -- the first version asked for the node and
+    # got a 405 problem document, which parsed fine and simply had no
+    # `parent_id` in it. A node moved under `leaf` would stop being a root, so
+    # this is the stronger assertion anyway.
+    roots = _problem(client.get("/api/v1/roots"))
+    assert isinstance(roots["items"], list)
+    still_a_root = [n for n in roots["items"] if n["id"] == root["id"]]
+    assert still_a_root, "the move was refused and happened anyway: the folder left the root"
+    assert still_a_root[0]["parent_id"] is None
+
+
+@pytest.mark.invariant
 def test_no_error_body_carries_sql_or_parameters(client: FlaskClient) -> None:
     """The other half of A-1, asserted at the boundary a caller actually sees."""
     responses = [
