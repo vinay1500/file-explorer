@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError } from "./api/client";
 import { signInAsGuest, signOut, whoAmI, type WhoAmI } from "./api/session";
+import { Explorer } from "./tree/Explorer";
 
 /**
  * The shell, until M6.4 puts a tree inside it.
@@ -115,9 +116,11 @@ export function App() {
           <button type="button" onClick={() => void leave()} disabled={busy}>
             {busy ? "Signing out…" : "Sign out"}
           </button>
+          <Explorer />
           <p className="muted">
-            The tree is not rebuilt yet &mdash; that is the next task. This page exists to prove
-            the session path, which is the thing the previous client could never do.
+            Drag a folder onto another to move it. <strong>Drag it onto the empty space below the
+            tree to move it back to the root</strong> &mdash; that is the operation the April 2025
+            client could not express at all.
           </p>
         </>
       )}
