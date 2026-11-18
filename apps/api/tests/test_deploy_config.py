@@ -105,3 +105,64 @@ def test_no_secret_is_committed_with_a_value() -> None:
         if block and not re.search(r"(sync:\s*false|generateValue:\s*true)", block.group(1)):
             offences.append(name)
     assert not offences, f"these are declared with a literal value in a public file: {offences}"
+
+
+@pytest.mark.invariant
+def test_a_free_instance_does_not_declare_a_paid_only_field() -> None:
+    """Render refuses the whole Blueprint, so this is not a runtime surprise.
+
+    `preDeployCommand` is available only to paid web services, private services
+    and background workers. A Blueprint that declares it on a free instance type
+    is rejected outright with *"pre-deploy command is not supported for free
+    tier services"* -- so the first person to apply it gets an error instead of
+    a deployment.
+
+    This file carried exactly that for a day. It was written from memory of how
+    Render ought to work rather than from the documentation, and nothing here
+    could have caught it: the field is valid YAML, the file parses, and no test
+    in this repository talks to Render.
+
+    What a test *can* do is refuse the combination, which is what this is.
+    """
+    text = RENDER.read_text(encoding="utf-8")
+    plans = re.findall(r"^\s*plan:\s*(\w+)", text, re.M)
+    assert plans, "no plan declared; the pattern is wrong"
+
+    if "free" in plans:
+        offenders = [f for f in ("preDeployCommand",) if re.search(rf"^\s*{f}:", text, re.M)]
+        assert not offenders, (
+            f"{offenders} is paid-only and this Blueprint declares plan: free. Render rejects "
+            "the Blueprint rather than the field, so nothing deploys at all. Migrations belong "
+            "in buildCommand on a free instance"
+        )
+
+
+@pytest.mark.invariant
+def test_the_deployed_python_version_is_pinned_and_matches_ci() -> None:
+    """Two mechanisms, because one failing silently puts prod on another interpreter.
+
+    Render's native Python runtime reads `PYTHON_VERSION` (full
+    major.minor.patch) and falls back to `.python-version`. `runtimeVersion`,
+    which this file used at first, is not how Python is pinned there at all.
+    """
+    pinned = Path(__file__).resolve().parents[1] / ".python-version"
+    assert pinned.is_file(), "apps/api/.python-version is missing"
+    version = pinned.read_text(encoding="utf-8").strip()
+
+    text = RENDER.read_text(encoding="utf-8")
+    declared = re.search(r"key:\s*PYTHON_VERSION\s*\n\s*value:\s*([\d.]+)", text)
+    assert declared, "render.yaml does not declare PYTHON_VERSION"
+    assert declared.group(1) == version, (
+        f"render.yaml says {declared.group(1)} and .python-version says {version}"
+    )
+
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    major_minor = ".".join(version.split(".")[:2])
+    assert f'python-version: "{major_minor}"' in ci, (
+        f"CI does not pin {major_minor}, so the deployment and the tests would differ"
+    )
+    # As a *field*, not as a word: the file explains in prose why that field is
+    # the wrong mechanism, and a substring check would fail on its own comment.
+    assert not re.search(r"^\s*runtimeVersion:", text, re.M), (
+        "runtimeVersion is not how Render pins Python"
+    )
