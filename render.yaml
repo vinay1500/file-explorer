@@ -7,11 +7,22 @@
 #
 # Two things here are deliberate and easy to get wrong.
 #
-# **Migrations run before the new code serves traffic.** `preDeployCommand` runs
-# after the build and before the switch, so a release whose migration fails does
-# not replace a working instance with a broken one. The alternative -- migrating
-# on start-up inside the worker -- races every other worker and has no way to
-# refuse.
+# **Migrations run in the build, and not where they belong.** The right place is
+# `preDeployCommand`, which runs after the build and before the switch. That
+# field is **paid-only**: Render rejects a Blueprint that declares it on a free
+# instance type, with "pre-deploy command is not supported for free tier
+# services". This file declared it for a day and would have been refused the
+# first time anyone applied it.
+#
+# So `flask db upgrade` is part of `buildCommand`. Environment variables are
+# available at build time, so it can reach the database, and a failing build
+# fails the deploy -- which preserves the property that matters: **a release
+# whose migration fails does not replace a working instance with a broken one.**
+#
+# The other free-plan option is to put it in `startCommand` ahead of gunicorn.
+# Rejected: the start command runs again after every spin-down, so a migration
+# would be attempted on each wake, adding seconds to a cold start that is
+# already about fifty.
 #
 # **No secret is in this file.** `sync: false` means "ask me once in the
 # dashboard and remember it", so the value never enters version control. A
@@ -27,13 +38,12 @@ services:
     region: singapore
     rootDir: apps/api
 
-    # 3.11 to match CI and the version the original deployment was already
-    # running. The committed virtualenv in the old repository was 3.12, which
-    # was never the interpreter that served a request.
-    runtimeVersion: "3.11"
-
-    buildCommand: pip install --upgrade pip && pip install .
-    preDeployCommand: flask db upgrade
+    # `runtimeVersion` is not how the Python runtime is pinned. Render's native
+    # Python runtime reads `PYTHON_VERSION` -- full major.minor.patch -- and
+    # falls back to a `.python-version` file. Both are set, because one of them
+    # being wrong in silence is how a deployment ends up on a different
+    # interpreter than CI.
+    buildCommand: pip install --upgrade pip && pip install . && flask db upgrade
 
     # Two workers on a free instance, because one worker serving a 50-second
     # cold start blocks the health probe behind it. `--timeout 30` is longer
@@ -46,6 +56,12 @@ services:
     healthCheckPath: /api/v1/health
 
     envVars:
+      # 3.11 to match CI, and the version the original deployment was already
+      # running. The committed virtualenv in the old repository was 3.12, which
+      # was never the interpreter that served a request.
+      - key: PYTHON_VERSION
+        value: 3.11.18
+
       - key: FLASK_APP
         value: file_explorer.app:create_app
 
