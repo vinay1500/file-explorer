@@ -419,6 +419,28 @@ jobs:
       - name: Audit dev dependencies (report only)
         run: npm audit || true
 
+      - name: Unit tests
+        run: npm test
+
+      # One browser, one gesture, and the API mocked. F-06 is entirely a
+      # client-side defect -- the server has accepted `new_parent_id: null`
+      # since M2 -- so the thing worth asserting is the *request the browser
+      # sends*, not the response it gets. Mocking the route asserts exactly
+      # that, with no database, no cold start and no shared state between runs.
+      - name: Install the browser Playwright needs
+        run: npx playwright install --with-deps chromium
+
+      - name: Drag to root, in a real browser
+        run: npm run e2e
+
+      - name: Keep the trace when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trace
+          path: apps/web/test-results/
+          retention-days: 7
+
       - name: No API hostname is baked into the bundle
         run: |
           hits=$(grep -rlE 'https?://[a-z0-9.-]*onrender\.com' dist 2>/dev/null || true)

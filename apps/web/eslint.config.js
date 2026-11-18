@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "src/api/schema.d.ts"] },
+  { ignores: ["dist", "src/api/schema.d.ts", "playwright-report", "test-results"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommendedTypeChecked],
     files: ["**/*.{ts,tsx}"],
@@ -13,7 +13,7 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
       parserOptions: {
-        project: ["./tsconfig.json", "./tsconfig.node.json"],
+        project: ["./tsconfig.json", "./tsconfig.node.json", "./tsconfig.e2e.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -27,7 +27,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["eslint.config.js", "vite.config.ts"],
+    files: ["eslint.config.js", "vite.config.ts", "playwright.config.ts", "e2e/**/*.ts"],
     extends: [tseslint.configs.disableTypeChecked],
   },
 );

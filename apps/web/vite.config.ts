@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -37,5 +38,19 @@ export default defineConfig({
   build: {
     outDir: "dist",
     sourcemap: true,
+  },
+  // Vitest's configuration lives here rather than in its own file. A separate
+  // `vitest.config.ts` means two `defineConfig`s, and if the two ever resolve
+  // different copies of Vite's types the plugin array stops type-checking with
+  // an error about overloads that says nothing about the actual cause. One
+  // config, one plugin list, one Vite.
+  test: {
+    environment: "jsdom",
+    globals: false,
+    // `e2e/` belongs to Playwright. Vitest collecting those files fails with a
+    // complaint about a missing test runner rather than a missing browser,
+    // which is the kind of error that costs an afternoon.
+    include: ["src/**/*.test.{ts,tsx}"],
+    restoreMocks: true,
   },
 });
