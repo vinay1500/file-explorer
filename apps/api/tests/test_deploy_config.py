@@ -91,6 +91,33 @@ def test_declaring_a_proxy_also_declares_the_hop_count() -> None:
 
 
 @pytest.mark.invariant
+def test_the_hop_count_can_actually_be_measured() -> None:
+    """The setting is unguessable by design, so the stack has to show its work.
+
+    `TRUST_PROXY_HOPS` must be read off a real request through the deployed
+    stack -- one hop too many and a caller sets their own `X-Forwarded-For` and
+    picks their own rate-limit bucket. Render only exposes HTTP request logs on
+    a paid workspace, so on a free instance the only place that header can
+    appear is the process's own access log. Without this the task is blocked on
+    something no free plan can supply, which is how a measurement quietly
+    becomes a guess.
+    """
+    text = RENDER.read_text(encoding="utf-8")
+    if not re.search(r"key:\s*BEHIND_PROXY\s*\n\s*value:\s*\"?1\"?", text):
+        pytest.skip("no proxy declared, so there is no hop count to measure")
+    start = re.search(r"startCommand: >-\n((?:\s{6}.*\n)+)", text)
+    assert start, "render.yaml has no folded startCommand block"
+    command = " ".join(line.strip() for line in start.group(1).splitlines())
+    assert "--access-logfile" in command, (
+        "gunicorn is not writing an access log, so no request is recorded at all"
+    )
+    assert "x-forwarded-for" in command.lower(), (
+        "the access log format never prints X-Forwarded-For, so TRUST_PROXY_HOPS could only be "
+        "guessed -- and guessing high is the failure the setting exists to prevent"
+    )
+
+
+@pytest.mark.invariant
 def test_no_secret_is_committed_with_a_value() -> None:
     """A connection string in a public repository is a published credential.
 

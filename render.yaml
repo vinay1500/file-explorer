@@ -49,9 +49,16 @@ services:
     # cold start blocks the health probe behind it. `--timeout 30` is longer
     # than any statement budget (5 s) plus a retry, so a worker is only killed
     # when something is genuinely stuck rather than merely slow.
+    #
+    # The access log format is not decoration. `TRUST_PROXY_HOPS` has to be
+    # measured off a real request through the real stack (M7.9), and Render
+    # only shows HTTP request logs on a paid workspace -- so the only way to
+    # see `X-Forwarded-For` on a free instance is for the process to print it.
+    # `xff=` is the raw header; the hop count is the number of addresses in it.
     startCommand: >-
       gunicorn 'file_explorer.app:create_app()'
       --workers 2 --timeout 30 --access-logfile - --error-logfile -
+      --access-logformat '%(h)s "%(r)s" %(s)s %(M)sms xff=%({x-forwarded-for}i)s'
 
     healthCheckPath: /api/v1/health
 
