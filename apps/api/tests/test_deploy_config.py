@@ -166,3 +166,34 @@ def test_the_deployed_python_version_is_pinned_and_matches_ci() -> None:
     assert not re.search(r"^\s*runtimeVersion:", text, re.M), (
         "runtimeVersion is not how Render pins Python"
     )
+
+
+@pytest.mark.invariant
+def test_the_editor_config_points_at_paths_that_exist() -> None:
+    """`pyrightconfig.json` silences a diagnostic, so it must not silence more.
+
+    It turns off `reportMissingImports`, which is correct here and only here:
+    D-13 means no package is installed on the developer's machine, so the
+    editor reports every third-party import as unresolved and is right to. mypy
+    in CI, where the packages exist, is what type-checks this code.
+
+    The risk in a file like that is that it quietly stops applying -- a path
+    that no longer exists, and the editor silently checks nothing. So the paths
+    are asserted, and so is the thing it must never turn off.
+    """
+    import json
+
+    config = json.loads((ROOT / "pyrightconfig.json").read_text(encoding="utf-8"))
+
+    for key in ("include", "extraPaths"):
+        for entry in config[key]:
+            assert (ROOT / entry).exists(), f"pyrightconfig {key} points at {entry}, which is gone"
+
+    assert config["reportUndefinedVariable"] == "error", (
+        "the editor config stopped flagging undefined names, which is the one diagnostic that "
+        "catches a typo nothing else sees until CI"
+    )
+    assert "apps/api/src" in config["extraPaths"], (
+        "without this the editor cannot resolve file_explorer.* either, and a first-party import "
+        "typo is a real bug"
+    )

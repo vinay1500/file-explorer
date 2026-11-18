@@ -1,0 +1,21 @@
+{
+  "//": "Read by Pylance in VS Code and by pyright on the command line. It exists because of D-13, not in spite of it.",
+
+  "//1": "Nothing is installed on this machine. There is no virtualenv, and the system interpreter has no Flask, no SQLAlchemy and no psycopg — every test runs in GitHub Actions against a real PostgreSQL. So the editor's 'Import \"flask\" could not be resolved' is CORRECT and useless: it reports a fact the project chose on purpose.",
+
+  "//2": "reportMissingImports is therefore off. mypy in CI, which runs where the packages exist, is what actually type-checks this code — see .github/workflows/ci.yml.",
+
+  "//3": "extraPaths is the half worth keeping. Without it the editor cannot resolve file_explorer.* either, and a typo in a first-party import is a real bug that nothing else catches until CI.",
+
+  "include": ["apps/api/src", "apps/api/tests", "apps/api/migrations", "tools"],
+  "extraPaths": ["apps/api/src"],
+  "pythonVersion": "3.11",
+
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+
+  "//4": "Everything below stays on, so the editor still earns its place: an undefined name, a dead expression or a mis-named self is still flagged where you can see it.",
+  "reportUndefinedVariable": "error",
+  "reportSelfClsParameterName": "warning",
+  "reportUnusedExpression": "warning"
+}
