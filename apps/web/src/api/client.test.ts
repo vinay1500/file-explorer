@@ -118,11 +118,14 @@ describe("failures carry the problem document", () => {
   });
 
   it("survives a body that is not a problem document", async () => {
+    // No cast: `fetchMock` is `vi.fn()`, so it accepts this shape as-is, and
+    // asserting a type the receiver already accepts is noise the linter is
+    // right to reject.
     fetchMock.mockResolvedValue({
       ok: false,
       status: 502,
       json: () => Promise.reject(new Error("not json")),
-    } as unknown as Response);
+    });
     await expect(request("/api/v1/roots")).rejects.toMatchObject({ status: 502, problem: null });
   });
 });
