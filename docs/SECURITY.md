@@ -126,6 +126,21 @@ cross-site request vector.
   person have an account*, available to anyone without a session — the oracle this very section
   exists to close, reopened through the side door. The trade is written out in
   `blueprints/auth.py` where the limit is declared.
+- **The configured limit is not the effective limit.** Flask-Limiter's default storage is
+  in-memory and therefore *per process*, and the deployment runs two gunicorn workers — so each
+  worker keeps its own counter and a caller gets the limit twice over. "10 per minute" on login
+  is up to **20 per minute** in practice, and a restart clears both counters.
+
+  Observed rather than assumed, on 2026-11-18: twelve rapid requests to the deployed service
+  returned two interleaved descending `X-RateLimit-Remaining` sequences carrying two different
+  `X-RateLimit-Reset` values. A fixed-window rollover would have produced one sequence and one
+  reset value.
+
+  The fix is a shared store — `RATELIMIT_STORAGE_URI` already points at Redis when there is one
+  — and there is no Redis on a free tier. Dropping to one worker is worse: a single worker
+  serving a 30–60 second cold start blocks the health probe behind it. **So this is accepted and
+  written down rather than fixed**, because a control whose real strength is undocumented is the
+  more dangerous of the two.
 - Login returns the same response and the same timing class for an unknown email and a wrong
   password. No user enumeration.
 - Tests: `test_login_does_not_enumerate_users`, and
