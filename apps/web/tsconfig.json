@@ -22,5 +22,5 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false
   },
-  "include": ["src", "vite.config.ts", "eslint.config.js"]
+  "include": ["src"]
 }
