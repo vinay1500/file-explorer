@@ -19,7 +19,7 @@ A chapter exists once it has something true to say. The table below lists all tw
 each is written — **a missing file means that milestone has not landed yet**, not that the
 chapter was forgotten. Empty placeholder files are worse than absent ones.
 
-Eleven of twenty are written. Every claim in them is either forensics on code that shipped in
+Twelve of twenty are written. Every claim in them is either forensics on code that shipped in
 April 2025, or a statement about code in this repository that names the test proving it.
 
 ---
@@ -75,7 +75,7 @@ The machinery around the code.
 |---|---|---|
 | 18 | Questions and answers | M3–M5, alongside the features they cover |
 | 19 | Five deep dives | M5 |
-| 20 | The stories to tell | M7 |
+| 20 | [The stories to tell](20-the-stories-to-tell.md) | **written** |
 
 ---
 
