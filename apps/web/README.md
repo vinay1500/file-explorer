@@ -1,27 +1,55 @@
 # apps/web
 
-The React frontend. Renders the tree, handles drag-and-drop, and talks to `apps/api`.
+The browser half of File Explorer. Vite 7, React 19, TypeScript 5.
 
-> **Being rebuilt.** This is still the original Create React App code from April 2025. It is
-> replaced with Vite and TypeScript at M6, at which point the API types are generated from the
-> backend's OpenAPI document rather than matched by hand.
+## State
 
-## Known problems in the current code
+**Scaffold only.** This directory was Create React App until 18 November 2026 and the rebuild is
+in progress — see milestone M6. What exists today is the project skeleton and a page that proves
+the API is reachable through the proxy. The tree, drag and drop, and the session client are the
+next three tasks.
 
-Carried over deliberately — they are the reason for the rebuild, and each has a fix scheduled:
+The April 2025 client is **not** ported and will not be. It called `/tree`, `/node`,
+`/node/{id}` and `/move/{id}`, none of which exist in the API's published document; it hardcoded
+the API's absolute hostname, which bypasses the rewrite and makes every request cross-site so the
+session cookie is refused; and it sent neither cookie nor CSRF header. Every request it can make
+fails. It is in the git history — `git log -- apps/web/src/components` — which is why the
+history was grafted rather than squashed.
 
-- **A node can never be moved back to the root.** `handleDrop` looks the drop target up by id
-  and returns early when it is missing; the root's id is `null`, so that lookup always fails.
-  Once an item is inside a folder, the interface cannot get it out.
-- **Failed requests are invisible.** Errors reach `console.error` and nothing else, so a failure
-  looks identical to nothing happening.
-- **Rename accepts anything.** An inline `contentEditable` sends raw `textContent` with no trim,
-  no length cap and no validation.
-- **Delete has no confirmation.** One click destroys a folder.
-- **The API hostname is compiled in.** No environment variable, so this cannot be pointed at a
-  local backend without editing source.
-- **Dead code.** `FolderNode.jsx` and `FileNode.jsx` are never imported.
+## Running it
 
-See [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) for what replaces this, and
-[docs/DESIGN-SYSTEM.md](../../docs/DESIGN-SYSTEM.md) for the tokens and component states it will
-be built against.
+```bash
+npm install
+npm run dev     # http://localhost:5173
+```
+
+`npm run dev` proxies `/api/*` to the deployed API. To point it somewhere else:
+
+```bash
+VITE_API_TARGET=http://localhost:5000 npm run dev
+```
+
+## Why the proxy is not a convenience
+
+In production the browser never talks to the API directly. Vercel rewrites `/api/*` to the Render
+service, which makes every request **same-origin** — and that is what lets a `SameSite=Lax`
+session cookie work at all. The API sends no CORS headers, because under that arrangement there
+is nothing to allow.
+
+A dev server pointing the browser straight at the deployed API would therefore be running a
+different application: cross-origin, no CORS headers, no cookie. Every request would fail, and it
+would look like a backend bug. The proxy reproduces the production shape, so what works here
+works there.
+
+This is the mistake the previous client made, and it is the reason the demo could never have
+signed in even if the rest of it had worked.
+
+## Commands
+
+| | |
+|---|---|
+| `npm run dev` | Dev server with the `/api` proxy |
+| `npm run build` | Typecheck, then build to `dist/` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint 9 flat config, type-aware |
+| `npm run api-types` | Regenerate `src/api/schema.d.ts` from the API's OpenAPI document |

@@ -333,6 +333,60 @@ jobs:
   # enforced by something only a real database does -- cascades, partial unique
   # indexes, recursive CTEs, row locks. A suite that passes on SQLite has
   # tested a different program.
+  web:
+    name: web build and types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # `npm ci` and not `npm install`: it installs exactly the committed
+      # lockfile and fails if package.json and the lock disagree. The lock is
+      # generated with `npm install --package-lock-only`, which resolves the
+      # tree without writing `node_modules` -- so D-13 holds and CI still gets
+      # a pinned build.
+      - name: Install
+        run: npm ci
+
+      # This job exists from the first commit of the frontend rather than from
+      # the last. M6 originally wired the web CI job up at the end of the
+      # milestone, which would have meant four tasks of TypeScript written
+      # against nothing that checks it -- the same shape as scheduling a
+      # frontend against a deployment that does not exist, which is what D-25
+      # had to correct.
+      - name: Types
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # The browser must never learn the API's hostname. An absolute URL
+      # bypasses the Vercel rewrite, which makes every request cross-site, and
+      # a SameSite=Lax session cookie is then refused at storage time. That is
+      # what the April 2025 client did and it is why it could never have signed
+      # in. The build output is the place to catch it, because a relative URL
+      # and an absolute one look identical in review.
+      - name: No API hostname is baked into the bundle
+        run: |
+          hits=$(grep -rlE 'https?://[a-z0-9.-]*onrender\.com' dist 2>/dev/null || true)
+          if [ -n "$hits" ]; then
+            echo "::error::the API hostname is compiled into the bundle, which bypasses the rewrite"
+            echo "$hits"
+            exit 1
+          fi
+          echo "  clean: every API call is relative"
+
   tests:
     name: tests
     runs-on: ubuntu-latest
