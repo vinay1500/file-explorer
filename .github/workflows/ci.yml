@@ -333,6 +333,81 @@ jobs:
   # enforced by something only a real database does -- cascades, partial unique
   # indexes, recursive CTEs, row locks. A suite that passes on SQLite has
   # tested a different program.
+  web:
+    name: web build and types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      # `npm ci` and not `npm install`: it installs exactly the committed
+      # lockfile and fails if package.json and the lock disagree. The lock is
+      # generated with `npm install --package-lock-only`, which resolves the
+      # tree without writing `node_modules` -- so D-13 holds and CI still gets
+      # a pinned build.
+      - name: Install
+        run: npm ci
+
+      # This job exists from the first commit of the frontend rather than from
+      # the last. M6 originally wired the web CI job up at the end of the
+      # milestone, which would have meant four tasks of TypeScript written
+      # against nothing that checks it -- the same shape as scheduling a
+      # frontend against a deployment that does not exist, which is what D-25
+      # had to correct.
+      - name: Types
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # The browser must never learn the API's hostname. An absolute URL
+      # bypasses the Vercel rewrite, which makes every request cross-site, and
+      # a SameSite=Lax session cookie is then refused at storage time. That is
+      # what the April 2025 client did and it is why it could never have signed
+      # in. The build output is the place to catch it, because a relative URL
+      # and an absolute one look identical in review.
+      # Production dependencies only, and it fails the build. Everything the
+      # browser is served has to be clean, and today it is: zero advisories.
+      #
+      # Dev dependencies are reported separately and do NOT fail, because as of
+      # 18 November the tree carries ten high-severity advisories that all
+      # reduce to one unfixable cause -- a ReDoS in `picomatch`, reached
+      # through `fdir` and `tinyglobby` by both Vite and typescript-eslint.
+      # 4.0.7 is the latest published version and the advisory covers <= 4.0.7,
+      # so there is nothing to upgrade to. npm's own suggested remedy is to
+      # DOWNGRADE Vite to 6.2.7, which would pull an older picomatch and fix
+      # nothing.
+      #
+      # Failing on that would make this step permanently red, and a permanently
+      # red check is one nobody reads. Reporting it keeps the information
+      # visible without destroying the signal from the line above.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Audit dev dependencies (report only)
+        run: npm audit || true
+
+      - name: No API hostname is baked into the bundle
+        run: |
+          hits=$(grep -rlE 'https?://[a-z0-9.-]*onrender\.com' dist 2>/dev/null || true)
+          if [ -n "$hits" ]; then
+            echo "::error::the API hostname is compiled into the bundle, which bypasses the rewrite"
+            echo "$hits"
+            exit 1
+          fi
+          echo "  clean: every API call is relative"
+
   tests:
     name: tests
     runs-on: ubuntu-latest

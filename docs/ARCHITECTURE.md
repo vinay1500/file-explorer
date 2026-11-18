@@ -34,9 +34,9 @@ trash/restore, search, real-time collaboration.
 | Layer | Now | Target | Note |
 |---|---|---|---|
 | Web framework | React 19.1.0 ✅ | React 19 | Kept |
-| Web build | Create React App / react-scripts 5.0.1 ✅ | **Vite 7** | CRA is deprecated |
-| Web language | JavaScript ✅ | **TypeScript 5** | API types generated from OpenAPI |
-| Server state | React Context ✅ | **TanStack Query v5** | Optimistic updates with rollback |
+| Web build | Create React App / react-scripts 5.0.1 ✅ | **Vite 7.3** — landed 18 Nov | CRA is deprecated. The dev server proxies `/api/*`, which is not a convenience: it reproduces the production rewrite, and without it the browser is cross-site and the session cookie is refused |
+| Web language | JavaScript ✅ | **TypeScript 5.9** — landed 18 Nov | `strict`, plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. API types generated from OpenAPI (planned, M6.2) |
+| Server state | React Context ✅ | **TanStack Query v5** | ~~Optimistic updates with rollback~~ — **claim cut, D-23.** Its failure mode is showing a tree the server does not have, which is the same class as the bug this project is named after |
 | HTTP client | axios 1.8.4 ✅ | fetch wrapper, typed | Drops a dependency |
 | Tree / drag-drop | react-dnd 16 + @minoru/react-dnd-treeview 3.5 ✅ | Same | `canDrop` **disables** the library's descendant check rather than adding to it — settled from source, 18 Nov |
 | Styling | Inline style objects + two CSS files ✅ | CSS custom properties + CSS Modules | See DESIGN-SYSTEM.md |
@@ -54,8 +54,8 @@ trash/restore, search, real-time collaboration.
 | Database | PostgreSQL ✅ | PostgreSQL 18 | Recursive CTEs, partial unique indexes. Managed by Neon in Singapore; CI pins the same major version |
 | WSGI | gunicorn 23.0.0 ✅ | **gunicorn 27.0.1**, 2 workers, 30s timeout | The access log format carries `X-Forwarded-For`, which is the only way to measure the proxy hop count on a free instance |
 | API tests | none ✅ | **pytest** + pytest-cov against real PostgreSQL | |
-| Lint / format | eslint-config-react-app ✅ | **Ruff** (api), **ESLint 9 + Prettier** (web) | |
-| Type check | none ✅ | **mypy** (api), **tsc** (web) | |
+| Lint / format | eslint-config-react-app ✅ | **Ruff** (api), **ESLint 9 flat + typescript-eslint** (web) — landed 18 Nov | Type-aware linting, so a rule can see what a value actually is |
+| Type check | none ✅ | **mypy** (api), **tsc** (web) — both in CI since 18 Nov | The web job runs from the frontend's first commit, not from the milestone's last |
 | Local dev | none ✅ | **Docker Compose** | api + web + postgres |
 | CI | none ✅ | **GitHub Actions** | |
 | API docs | none ✅ | **OpenAPI 3.1** + Swagger UI | Generated, not hand-written |
