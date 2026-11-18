@@ -18,6 +18,33 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      # The probe and the browser must point at the same service. They are
+      # configured in two different places -- a repository variable and a
+      # committed file -- and nothing connected them, so the probe could have
+      # been green against a service the frontend never calls. Render appends a
+      # random suffix when a subdomain is taken, which is exactly the kind of
+      # difference nobody notices by eye.
+      - name: The probe and the rewrite must name the same host
+        env:
+          API_URL: ${{ vars.API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "::notice::API_URL is not set, so there is nothing to cross-check yet."
+            exit 0
+          fi
+          rewrite=$(grep -o '"destination": "https://[^/"]*' vercel.json | sed 's|.*//||')
+          probe=${API_URL#http://}
+          probe=${probe#https://}
+          probe=${probe%%/*}
+          if [ "$rewrite" != "$probe" ]; then
+            echo "::error::API_URL names '$probe' and vercel.json rewrites to '$rewrite'."
+            echo "The probe and the browser are pointed at different services."
+            exit 1
+          fi
+          echo "  both name $probe"
+
       - name: Probe the API's readiness endpoint
         env:
           API_URL: ${{ vars.API_URL }}
