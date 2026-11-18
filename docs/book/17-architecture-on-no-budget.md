@@ -113,13 +113,60 @@ someone's head.
 
 ## The cold start, handled rather than hidden
 
-The fifty-second wake does not disappear. The interface will state it — a visible *"waking the
-server; this demo runs on a free tier and can take up to a minute"* once the first request
-passes two seconds. That is M6 work.
+The wake does not disappear. The interface states it: the rebuilt frontend's first state is
+*waking*, with copy naming the cause. A blank screen for a minute says nothing — or worse, says
+the application is broken, which is exactly what happened for seventeen months.
 
-This reads better than a workaround. It says the infrastructure's constraints are understood and
-were handled deliberately. A blank screen for a minute says nothing — or worse, says the
-application is broken, which is exactly what happened for seventeen months.
+## What the free tier actually charged, once it was deployed
+
+Written on 13 November as a plan; this section was added on 18 November, after the deployment
+existed. **Three of the constraints below were not in the plan**, and none of them could have
+been found by reading pricing pages.
+
+**`preDeployCommand` is paid-only, and Render rejects the entire Blueprint that declares it.**
+Not the command — the whole file, on apply. `render.yaml` carried it for a day. The first
+action anyone took would have been reading an error. Migrations moved into `buildCommand`,
+where environment variables are available and a failing build fails the deploy, which preserves
+the property that mattered: *a release whose migration fails does not replace a working
+instance with a broken one.* The other free option — running migrations in the start command —
+was rejected because the start command runs again after every spin-down, putting a migration
+attempt in front of a cold start that is already about fifty seconds.
+
+**HTTP request logs are Professional-and-above.** That sounds like an observability nicety. It
+is not: `ProxyFix` needs a hop count that *must* be measured against the deployed stack, because
+one hop too many lets a caller set their own `X-Forwarded-For` and choose their own rate-limit
+bucket. With no HTTP logs there is nowhere that header appears — **a setting the code refuses
+to default, specifically so it would be measured, was arranged so it could only be guessed.**
+The fix was to make the application print it: gunicorn's access log format now carries
+`xff=%({x-forwarded-for}i)s`.
+
+**The subdomain was taken, so Render appended a suffix.** The service is
+`file-explorer-api-xgxr.onrender.com`, not `file-explorer-api.onrender.com`. A test written the
+day before asserted the literal `<name>.onrender.com` appeared in `vercel.json` — so it
+**passed on the stale hostname and would have failed on the correct one.** A guard that
+enforces a wrong value is worse than no guard: it is an argument against fixing the bug,
+producible on demand as evidence the file was fine.
+
+## The limit that is not the limit
+
+Flask-Limiter's default storage is in-memory and therefore *per process*, and this deployment
+runs two gunicorn workers. **Each keeps its own counter, so a caller gets the configured limit
+twice over**: "10 per minute" on login is up to 20.
+
+`config.py` has said so in a comment since M3b. `SECURITY.md` — the document somebody reads to
+find out how strong a control is — did not, until it was *observed*: twelve rapid requests to
+the deployed service returned two interleaved descending `X-RateLimit-Remaining` sequences
+carrying **two different `X-RateLimit-Reset` values**.
+
+That measurement nearly went the other way. A single odd reading is equally consistent with a
+fixed window rolling over, and the remaining counter cannot tell the two apart. Only the reset
+value can. It is the clearest example in this project of a plausible explanation that happened
+to be wrong, and of the rule for avoiding them: **find the field that discriminates before
+recording the fact.**
+
+Accepted rather than fixed. A shared store needs a Redis the free tier does not have, and
+dropping to one worker puts a cold start in front of the health probe. A control whose real
+strength is undocumented is the worse of the two.
 
 ## The rule this chapter exists to state
 
