@@ -22,5 +22,10 @@
     "resolveJsonModule": true,
     "allowImportingTsExtensions": false
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests get their own project (`tsconfig.test.json`) because one of them
+  // reads a source file off disk to assert its shape, and that needs Node
+  // types. Adding them here instead would let *application* code reach for a
+  // Node global, typecheck cleanly, and fail in a browser.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
