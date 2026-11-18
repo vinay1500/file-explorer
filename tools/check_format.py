@@ -125,6 +125,19 @@ def wrapped_but_fits(src: str, lines: list[str]) -> list[tuple[int, int]]:
             indent = len(lines[op.start[0] - 1]) - len(lines[op.start[0] - 1].lstrip())
             if indent + len(inner.strip()) <= LIMIT:
                 out.append((op.start[0], indent + len(inner.strip())))
+                continue
+
+            # ruff has a second move this missed for a day: when the whole
+            # construct does not fit, it still joins the bracket's *contents*
+            # onto one line and leaves the brackets split. Narrowly detected --
+            # only when the contents occupy exactly two lines, because that is
+            # the case seen in practice and a wider rule would start guessing.
+            body = lines[op.start[0]:t.start[0] - 1]
+            if len(body) == 2 and all(l.strip() for l in body):
+                joined = re.sub(r"\s+", " ", " ".join(l.strip() for l in body))
+                body_indent = len(body[0]) - len(body[0].lstrip())
+                if body_indent + len(joined) <= LIMIT:
+                    out.append((op.start[0] + 1, body_indent + len(joined)))
     return out
 
 

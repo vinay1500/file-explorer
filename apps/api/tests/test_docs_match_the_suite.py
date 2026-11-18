@@ -179,8 +179,7 @@ def test_the_cut_claims_still_have_a_subject() -> None:
     removing it.
     """
     mentions = {
-        claim: sum(claim in doc.read_text(encoding="utf-8") for doc in DOCS)
-        for claim in CUT_CLAIMS
+        claim: sum(claim in doc.read_text(encoding="utf-8") for doc in DOCS) for claim in CUT_CLAIMS
     }
     missing = [claim for claim, count in mentions.items() if count == 0]
     assert not missing, (
