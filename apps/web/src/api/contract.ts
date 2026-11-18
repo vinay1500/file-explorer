@@ -25,6 +25,12 @@ export type NodeMove = components["schemas"]["NodeMove"];
 export type NodeRename = components["schemas"]["NodeRename"];
 export type Page = components["schemas"]["Page"];
 export type Problem = components["schemas"]["Problem"];
+export type Breadcrumb = components["schemas"]["Breadcrumb"];
+export type Path = components["schemas"]["Path"];
+export type Deleted = components["schemas"]["Deleted"];
+export type Session = components["schemas"]["Session"];
+export type WhoAmI = components["schemas"]["WhoAmI"];
+export type Credentials = components["schemas"]["Credentials"];
 
 /** Compiles only when `Condition` is exactly `true`. */
 type Assert<Condition extends true> = Condition;
