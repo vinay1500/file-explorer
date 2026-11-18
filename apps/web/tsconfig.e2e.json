@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    // Playwright specs are Node code that also describes work happening inside
+    // the browser -- `page.evaluateHandle(() => new DataTransfer())` is one
+    // expression spanning both. So this project needs DOM *and* node types.
+    //
+    // It is a third tsconfig rather than DOM added to the node one, because
+    // then `vite.config.ts` and `playwright.config.ts` could reach for a DOM
+    // global and typecheck cleanly before failing at runtime in Node.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["e2e"]
+}
