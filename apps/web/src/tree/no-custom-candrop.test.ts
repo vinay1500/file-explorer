@@ -48,6 +48,13 @@ describe("the Tree is not given a custom canDrop", () => {
   it("still explains why, so the next reader does not add one", () => {
     // A guard whose reason is not written next to it gets removed by somebody
     // tidying up. Four of this project's findings were introduced that way.
-    expect(EXPLORER).toMatch(/replaces all four rules/i);
+    //
+    // Whitespace and the leading `*` of a block comment are collapsed first.
+    // The first version of this test matched the raw source and failed on its
+    // own explanation, because the sentence wraps across two lines -- a guard
+    // that fails when the prose is merely *formatted* differently is one
+    // somebody deletes rather than fixes.
+    const prose = EXPLORER.replace(/^\s*\*/gm, " ").replace(/\s+/g, " ");
+    expect(prose).toMatch(/replaces all four rules/i);
   });
 });
