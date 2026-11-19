@@ -327,6 +327,86 @@ def unsorted_import_statements(src: str, path: Path) -> list[str]:
     return out
 
 
+def magic_trailing_comma(src: str, path: Path) -> list[str]:
+    """Flag a bracketed construct that ruff will explode one element per line.
+
+    A trailing comma before a closing bracket is a *magic* trailing comma: ruff
+    treats it as an instruction to keep the construct exploded, and exploded
+    means **one element per line**, not merely "split somewhere". A dict written
+
+        words = {
+            "ten": 10, "eleven": 11,
+            "twelve": 12,
+        }
+
+    is rejected, and the diff is the whole construct. That cost CI run eleven.
+
+    This rule was tried once before and backed out, because it counted every
+    comma and so fired on nested structures that legitimately put several
+    tokens on one line -- fourteen false positives against a tree CI had just
+    passed. The difference here is that it counts **only separators at the
+    construct's own bracket depth**, so
+
+        checks = [
+            ("a", "b", "c"),
+            ("d", "e", "f"),
+        ]
+
+    is one element per line and stays silent. A checker that disagrees with the
+    linter it stands in for is worse than no checker, so this one is held to
+    producing nothing against a tree ruff has already accepted.
+    """
+    out: list[str] = []
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(src).readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return out
+
+    class Frame:
+        def __init__(self, opened: int) -> None:
+            self.opened = opened
+            self.per_line: dict[int, int] = {}
+            # A lambda's parameters are separated by commas at the *enclosing*
+            # bracket depth, because nothing brackets them. Counting those as
+            # element separators reported `monkeypatch.setattr(name, lambda a,
+            # b: ...)` as crowded, which is the first false positive this rule
+            # produced and the reason it tracks lambdas at all.
+            self.in_lambda = False
+
+    stack: list[Frame] = []
+    previous: tokenize.TokenInfo | None = None
+    skip = {tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT}
+
+    for tok in tokens:
+        if tok.type == tokenize.OP and tok.string in "([{":
+            stack.append(Frame(tok.start[0]))
+        elif tok.type == tokenize.OP and tok.string in ")]}":
+            if not stack:
+                continue
+            frame = stack.pop()
+            trailing = previous is not None and previous.string == ","
+            if trailing and tok.start[0] > frame.opened:
+                crowded = sorted(line for line, n in frame.per_line.items() if n > 1)
+                if crowded:
+                    out.append(
+                        f"{path}:{crowded[0]}: magic trailing comma at line {frame.opened} - "
+                        f"ruff format explodes this one element per line, and line "
+                        f"{crowded[0]} holds {frame.per_line[crowded[0]]} of them"
+                    )
+        elif stack:
+            frame = stack[-1]
+            if tok.type == tokenize.NAME and tok.string == "lambda":
+                frame.in_lambda = True
+            elif tok.type == tokenize.OP and tok.string == ":" and frame.in_lambda:
+                frame.in_lambda = False
+            elif tok.type == tokenize.OP and tok.string == "," and not frame.in_lambda:
+                frame.per_line[tok.start[0]] = frame.per_line.get(tok.start[0], 0) + 1
+        if tok.type not in skip:
+            previous = tok
+
+    return out
+
+
 def check(path: Path) -> list[str]:
     src = path.read_text()
     lines = src.splitlines()
@@ -345,6 +425,7 @@ def check(path: Path) -> list[str]:
     out += unsorted_import_names(src, path)
     out += unsorted_import_statements(src, path)
     out += blank_lines_after_top_level(src, path)
+    out += magic_trailing_comma(src, path)
 
     for line, width in wrapped_but_fits(src, lines):
         out.append(

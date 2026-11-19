@@ -15,13 +15,15 @@ it honest:
    row in [CHANGELOG.md](CHANGELOG.md) rather than a silent rewrite.
 3. **Unverified stays visible.** Anything believed but not demonstrated is marked, every time.
 
-A chapter exists once it has something true to say. The table below lists all twenty and when
-each is written — **a missing file means that milestone has not landed yet**, not that the
-chapter was forgotten. Empty placeholder files are worse than absent ones.
+A chapter exists once it has something true to say. Empty placeholder files are worse than
+absent ones, so for most of this project's life the table below had gaps, and each gap meant
+that milestone had not landed yet.
 
-Fifteen of twenty are written. A chapter exists once it has something true to say, so this number is the count of files, not a target.
-Every claim in them is either forensics on code that shipped in
-April 2025, or a statement about code in this repository that names the test proving it.
+Twenty of twenty are written, and the number is a count of the files rather than a target — a
+test asserts that this sentence and the directory agree, and that every chapter is linked,
+because the count has been wrong twice. Every claim in them is either forensics on code that
+shipped in April 2025, or a statement about code in this repository that names the test proving
+it.
 
 ---
 
@@ -31,8 +33,8 @@ Why hierarchical data is hard in a relational store, and why this schema.
 
 | # | Chapter | Status |
 |---|---|---|
-| 1 | Why hierarchies are hard | M3 |
-| 2 | Four ways to store a tree | M3 |
+| 1 | [Why hierarchies are hard](01-why-hierarchies-are-hard.md) | **written** |
+| 2 | [Four ways to store a tree](02-four-ways-to-store-a-tree.md) | **written** |
 | 3 | [The schema, line by line](03-the-schema.md) | **written** |
 | 4 | [The eight invariants](04-the-eight-invariants.md) | **written** |
 
@@ -45,7 +47,7 @@ Forensics on the version that shipped in April 2025.
 | 5 | [The cycle](05-the-cycle.md) | **written** |
 | 6 | [The orphans](06-the-orphans.md) | **written** |
 | 7 | [The silent outage](07-the-silent-outage.md) | **written** |
-| 8 | The register | M4 |
+| 8 | [The register](08-the-register.md) | **written** |
 
 ## Volume III · The Rebuild
 
@@ -74,8 +76,8 @@ The machinery around the code.
 
 | # | Chapter | Status |
 |---|---|---|
-| 18 | Questions and answers | M3–M5, alongside the features they cover |
-| 19 | Five deep dives | M5 |
+| 18 | [Questions and answers](18-questions-and-answers.md) | **written** · Q1–Q19; the rest live in their own chapters |
+| 19 | [Five deep dives](19-five-deep-dives.md) | **written** |
 | 20 | [The stories to tell](20-the-stories-to-tell.md) | **written** |
 
 ---

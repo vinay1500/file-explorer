@@ -251,3 +251,48 @@ def test_the_guard_can_see_the_suite_it_is_guarding() -> None:
         assert doc.is_file(), f"{doc} is not where this test expects it"
         claimed, planned = _named(doc)
         assert claimed or planned, f"{doc.name} names no tests at all, which it used to"
+
+
+@pytest.mark.invariant
+def test_the_book_index_counts_its_own_chapters() -> None:
+    """The index may not state a chapter count that disagrees with the files.
+
+    `docs/book/README.md` has said the wrong number twice -- once because it was
+    incremented rather than counted, in the file whose opening line is "three
+    rules keep it honest". Vinay's first pull request made the sentence say what
+    the number *means*; this makes the number itself checkable, which is the
+    only version of that fix that survives the next chapter.
+    """
+    index = ROOT / "docs" / "book" / "README.md"
+    chapters = sorted(
+        path for path in (ROOT / "docs" / "book").iterdir() if re.match(r"^\d\d-", path.name)
+    )
+
+    words = {
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+        "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+        "twenty": 20,
+    }
+    text = index.read_text(encoding="utf-8")
+    stated = re.search(r"\b([A-Z][a-z]+) of twenty are written", text)
+    assert stated is not None, "the index no longer states a chapter count in the expected shape"
+
+    claimed = words.get(stated.group(1).lower())
+    assert claimed is not None, f"unrecognised number word: {stated.group(1)}"
+    assert claimed == len(chapters), (
+        f"the index says {stated.group(1).lower()} chapters are written and "
+        f"{len(chapters)} files exist: {[p.name for p in chapters]}"
+    )
+
+    # And every written chapter is linked from the index, because a chapter
+    # nobody can navigate to is not published, it is stored.
+    for chapter in chapters:
+        assert chapter.name in text, f"{chapter.name} exists and the index does not link it"
