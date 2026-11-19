@@ -1,106 +1,699 @@
+/*
+ * One stylesheet, hand written, no framework.
+ *
+ * The version before this one was 107 lines and looked like a wireframe:
+ * no icons, no distinction between a file and a folder, two black buttons
+ * stacked on a bare page, and `color-scheme: light dark` with nothing else,
+ * which handed the whole appearance to whatever the visitor's machine was set
+ * to. On a dark-mode laptop the demo opened as a dark screen with flat grey
+ * rows, and there was no control to change it.
+ *
+ * So the rules here are: **light by default for everybody**, dark on request
+ * through `[data-theme]`, and every colour named once as a token so the two
+ * themes cannot drift apart. D-23 cut the eleven-state design system; this is
+ * the smaller thing that was supposed to replace it and never did.
+ */
+
 :root {
-  color-scheme: light dark;
-  --ink: #16181d;
-  --muted: #5c6370;
-  --ok: #1a7f4b;
-  --bad: #b3261e;
+  --bg: #f4f6f8;
   --surface: #ffffff;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  line-height: 1.55;
+  --surface-2: #f7f8fa;
+  --ink: #1a1e26;
+  --ink-2: #3d4452;
+  --muted: #6b7280;
+  --line: #e3e7ec;
+  --line-strong: #c9d0d9;
+  --accent: #2f62d8;
+  --accent-soft: #e8efff;
+  --ok: #176b43;
+  --ok-soft: #e4f4ec;
+  --bad: #b3261e;
+  --bad-soft: #fdeceb;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 6%);
+
+  --k-pdf: #c2362c;
+  --k-image: #7a3fb8;
+  --k-text: #2f62d8;
+  --k-sheet: #176b43;
+  --k-archive: #96621a;
+  --k-other: #6b7280;
+
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #e6e8ec;
-    --muted: #9aa2b1;
-    --ok: #5cc98d;
-    --bad: #ff8a80;
-    --surface: #15171c;
-  }
+[data-theme="dark"] {
+  --bg: #0e1116;
+  --surface: #161a21;
+  --surface-2: #1c222b;
+  --ink: #e7eaf0;
+  --ink-2: #c3c9d4;
+  --muted: #949cab;
+  --line: #262d38;
+  --line-strong: #39424f;
+  --accent: #7aa2ff;
+  --accent-soft: #1b2745;
+  --ok: #5cc98d;
+  --ok-soft: #14301f;
+  --bad: #ff8d84;
+  --bad-soft: #351a18;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 32%);
+
+  --k-pdf: #ff8d84;
+  --k-image: #c79bff;
+  --k-text: #7aa2ff;
+  --k-sheet: #5cc98d;
+  --k-archive: #e0b062;
+  --k-other: #949cab;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: var(--surface);
+  background: var(--bg);
   color: var(--ink);
 }
 
-.shell {
-  max-width: 44rem;
-  margin: 0 auto;
-  padding: 3rem 1.25rem;
+/* ---------- page frame ---------- */
+
+.page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-h1 {
-  font-size: 1.6rem;
-  letter-spacing: -0.02em;
-  margin: 0 0 1rem;
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.25rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.mark {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  flex: none;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #9b6bff));
+}
+
+.top h1 {
+  font-size: 1.05rem;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.tag {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.top-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.who {
+  font-size: 0.78rem;
+  color: var(--muted);
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell {
+  flex: 1;
+  width: 100%;
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 1.75rem 1.25rem 2.5rem;
+}
+
+.bottom {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.9rem 1.25rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.bottom a {
+  color: var(--accent);
+}
+
+/* ---------- panels ---------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.panel.center {
+  text-align: center;
+  padding: 2.5rem 1.25rem;
+}
+
+.panel-h {
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.panel-h.bad {
+  color: var(--bad);
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.mono-small {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0.5rem 0 0;
 }
 
 .note {
   margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  flex-wrap: wrap;
 }
+
 .note.ok {
   color: var(--ok);
+  background: var(--ok-soft);
 }
+
 .note.bad {
   color: var(--bad);
+  background: var(--bad-soft);
 }
-.muted {
+
+.hint {
+  font-size: 0.8rem;
   color: var(--muted);
-  font-size: 0.95rem;
+  margin: 0.9rem 0 0;
+  line-height: 1.6;
 }
+
+.empty {
+  font-size: 0.88rem;
+  color: var(--muted);
+  padding: 1.25rem 0.5rem;
+  text-align: center;
+}
+
+/* ---------- buttons ---------- */
 
 button {
   font: inherit;
-  font-weight: 600;
-  padding: 0.55rem 1.1rem;
-  border-radius: 6px;
-  border: 1px solid var(--ink);
-  background: var(--ink);
-  color: var(--surface);
+  font-size: 0.85rem;
+  font-weight: 550;
+  padding: 0.45rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
   cursor: pointer;
+  transition: background 120ms, border-color 120ms, color 120ms;
 }
+
+button:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: progress;
 }
+
 button:focus-visible {
-  outline: 3px solid var(--ok);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* ---- the tree ---- */
-.explorer { margin: 1.25rem 0; }
-.tree-root { list-style: none; padding: 0; margin: 0; }
-.tree-root ul { list-style: none; padding: 0; margin: 0; }
-.row {
-  display: flex; align-items: center; gap: 0.5rem;
-  padding: 0.3rem 0.4rem; border-radius: 5px;
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
-.row:hover { background: color-mix(in srgb, var(--ink) 7%, transparent); }
-.tree-drop > .row, .tree-drop { outline: 2px solid var(--ok); outline-offset: -2px; border-radius: 5px; }
-.tree-dragging { opacity: 0.45; }
-.twist {
-  width: 1.5rem; height: 1.5rem; padding: 0; display: inline-flex;
-  align-items: center; justify-content: center;
-  background: transparent; color: var(--ink); border: 0; cursor: pointer;
-}
-.name { flex: 1; }
-.rename { font: inherit; flex: 1; padding: 0.2rem 0.4rem; border: 1px solid var(--ok); border-radius: 4px; }
-.actions { display: flex; gap: 0.35rem; opacity: 0; transition: opacity 120ms; }
-.row:hover .actions, .row:focus-within .actions { opacity: 1; }
-.actions button {
-  font-size: 0.8rem; padding: 0.2rem 0.55rem;
-  background: transparent; color: var(--ink); border: 1px solid var(--muted);
-}
-.confirm {
-  margin-top: 1rem; padding: 1rem 1.1rem; border-radius: 8px;
-  border: 1px solid var(--bad); background: color-mix(in srgb, var(--bad) 8%, var(--surface));
-}
-.confirm p { margin: 0 0 0.6rem; }
-.confirm button { margin-inline-end: 0.5rem; }
-.confirm .ghost { background: transparent; color: var(--ink); }
 
-.toolbar { margin: 0 0 0.75rem; }
-.toolbar button { font-size: 0.9rem; padding: 0.35rem 0.8rem; }
+[data-theme="dark"] button.primary {
+  color: #0e1116;
+}
+
+button.primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 85%, black);
+}
+
+button.big {
+  font-size: 0.95rem;
+  padding: 0.65rem 1.4rem;
+}
+
+button.small {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.65rem;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+button.danger {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+button.link {
+  background: none;
+  border: 0;
+  padding: 0.2rem 0;
+  color: var(--accent);
+  font-size: 0.82rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.icon-btn.danger {
+  border-color: transparent;
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+/* ---------- the gate ---------- */
+
+.gate-h {
+  margin: 0 0 0.35rem;
+  font-size: 1.1rem;
+}
+
+.gate-lede {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  max-width: 34rem;
+}
+
+.gate .primary.big {
+  display: block;
+}
+
+.gate .link {
+  margin-top: 0.75rem;
+  display: inline-block;
+}
+
+.gate-form {
+  max-width: 24rem;
+}
+
+/* The mode switch stands above the form, so the separator belongs to it. */
+.seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-2);
+  margin: 1rem 0 0.9rem;
+}
+
+.gate .seg {
+  margin-top: 1.1rem;
+}
+
+.seg button {
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.7rem;
+  color: var(--muted);
+}
+
+.seg button.seg-on {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 8%);
+}
+
+.field {
+  display: block;
+  margin-bottom: 0.7rem;
+}
+
+.field span {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-bottom: 0.25rem;
+}
+
+.field input {
+  font: inherit;
+  font-size: 0.88rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+/* ---------- waking ---------- */
+
+.spinner {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid var(--line-strong);
+  border-top-color: var(--accent);
+  animation: spin 800ms linear infinite;
+  margin-bottom: 0.75rem;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
+}
+
+.wake-bar {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--line);
+  margin: 1rem auto 0;
+  max-width: 22rem;
+  overflow: hidden;
+}
+
+.wake-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 400ms linear;
+}
+
+/* ---------- the tree ---------- */
+
+.explorer {
+  padding-bottom: 1rem;
+}
+
+.ex-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.9rem;
+}
+
+.new-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.4rem 0.7rem;
+}
+
+/*
+ * F-62 lives here.
+ *
+ * `padding-bottom` is what gives the tree's own container an area a pointer
+ * can land on, and the band is drawn by `::after` *inside* that padding. A
+ * pseudo-element is part of its originating element for hit testing, so
+ * `document.elementFromPoint` over the band returns this `<ul>` -- which is
+ * what makes `dropTargetNode === undefined`, which is how the library says
+ * "the root". A child element would have been the topmost target instead.
+ *
+ * Before this rule the container's height was exactly the sum of its rows:
+ * 1,368 points sampled inside it on the deployed site, zero of which resolved
+ * to the container. The gesture the whole project is named after had no
+ * pixels.
+ */
+.tree-root {
+  list-style: none;
+  padding: 0 0 62px;
+  margin: 0;
+  position: relative;
+}
+
+.tree-root ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tree-root::after {
+  content: "Drop here to move to the top level";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 6px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  /*
+   * The band is paint, not a target. Hit testing reaches the `<ul>` through
+   * its own padding box either way -- a pseudo-element is never what
+   * `elementFromPoint` returns -- so switching pointer events off costs the
+   * drop nothing and stops the band from covering a row if the padding above
+   * it is ever reduced. Mutation 22 found that: deleting the padding left the
+   * band overlapping the rows and intercepting clicks on their buttons.
+   */
+  pointer-events: none;
+}
+
+.tree-root.tree-drop::after {
+  border-color: var(--accent);
+  border-style: solid;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 34px;
+  padding-inline-end: 0.4rem;
+  border-radius: 7px;
+}
+
+/*
+ * The indent guide: one dotted riser per nested row, at its parent's column.
+ *
+ * The class decides whether it is drawn, not a selector matching the inline
+ * style string -- `[style*="--depth:0"]` depends on how the browser chooses
+ * to serialise a custom property, which is not something to build a layout on.
+ */
+.row.indented::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((var(--depth, 1) - 1) * 20px + 16px);
+  border-left: 1px dotted var(--line-strong);
+}
+
+.row:hover {
+  background: var(--surface-2);
+}
+
+li.tree-drop > .row {
+  background: var(--accent-soft);
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
+
+.tree-dragging {
+  opacity: 0.4;
+}
+
+.twist {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-radius: 5px;
+  transition: transform 120ms;
+}
+
+.twist.open {
+  transform: rotate(90deg);
+}
+
+.twist:hover {
+  color: var(--ink);
+}
+
+.ic {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.ic-folder {
+  color: var(--accent);
+}
+
+.ic.inline {
+  display: inline-block;
+  vertical-align: -3px;
+  color: var(--muted);
+}
+
+.k-pdf { color: var(--k-pdf); }
+.k-image { color: var(--k-image); }
+.k-text { color: var(--k-text); }
+.k-sheet { color: var(--k-sheet); }
+.k-archive { color: var(--k-archive); }
+.k-other { color: var(--k-other); }
+
+.name {
+  flex: 1;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.is-folder .name {
+  font-weight: 550;
+}
+
+.is-file .name {
+  color: var(--ink-2);
+}
+
+.rename {
+  font: inherit;
+  font-size: 0.88rem;
+  flex: 1;
+  min-width: 6rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  gap: 0.15rem;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.row:hover .actions,
+.row:focus-within .actions {
+  opacity: 1;
+}
+
+/*
+ * Pointer-coarse devices have no hover, so actions that appear on hover never
+ * appear at all. On touch they stay visible.
+ */
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}
+
+.confirm {
+  margin-top: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--bad);
+  background: var(--bad-soft);
+}
+
+.confirm p {
+  margin: 0 0 0.6rem;
+}
+
+.confirm button {
+  margin-inline-end: 0.5rem;
+}
