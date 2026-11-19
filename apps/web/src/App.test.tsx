@@ -45,14 +45,64 @@ describe("a cold start under StrictMode", () => {
       </StrictMode>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/Waking the server/)).toBeInTheDocument();
-    });
+    // The first attempt gets no panel: on a warm instance it answers in a
+    // third of a second, and a flash of "waking the server" would be a lie.
+    // The panel appears on the first retry, one second later.
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Waking the server/)).toBeInTheDocument();
+      },
+      { timeout: 4_000 },
+    );
 
     // The second effect invocation must not be able to speak over the first.
     expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument();
-    expect(screen.queryByText("That did not work")).not.toBeInTheDocument();
+    expect(screen.queryByText(/request failed with/)).not.toBeInTheDocument();
   });
+
+  it("keeps waiting when the session check itself 502s, over and over", async () => {
+    // **This is the bug Vinay hit on 19 November**, in the shape the code
+    // could actually produce it: the old version polled `/api/v1/health`
+    // until it answered and then made ONE unprotected call to
+    // `/api/v1/auth/me`. When that call 502'd, the waiting panel was replaced
+    // by `request failed with 502 (HTTP 502)` after 51 seconds of waiting.
+    //
+    // There is no health poll any more, so the test is simply: the request
+    // the page needs fails five times and then works, and the screen never
+    // stops waiting.
+    fetchMock
+      .mockResolvedValueOnce(reply(502, null, false))
+      .mockResolvedValueOnce(reply(502, null, false))
+      .mockResolvedValueOnce(reply(502, null, false))
+      .mockResolvedValueOnce(reply(502, null, false))
+      .mockResolvedValueOnce(reply(502, null, false))
+      .mockResolvedValue(reply(401, null, false));
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Waking the server/)).toBeInTheDocument();
+      },
+      { timeout: 4_000 },
+    );
+    expect(screen.queryByText(/request failed with/)).not.toBeInTheDocument();
+
+    // 401 means "nobody is signed in", which is the ordinary start-up state:
+    // the gate appears, not an error.
+    await waitFor(
+      () => {
+        expect(screen.getByText("Have a look around")).toBeInTheDocument();
+      },
+      { timeout: 25_000 },
+    );
+    expect(screen.queryByText(/request failed with/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument();
+  }, 30_000);
 
   it("reports a 503 immediately instead of waiting it out", async () => {
     fetchMock.mockResolvedValue(reply(503, { title: "degraded" }, false));

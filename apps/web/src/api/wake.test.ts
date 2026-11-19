@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
-import { isColdStart, wakeApi } from "./wake";
+import { StillWaking, isColdStart, keepTrying, wakeApi } from "./wake";
 
 /**
  * The cold start, which is the first thing a visitor meets and was the first
@@ -103,7 +103,7 @@ describe("wakeApi", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("gives up when the budget runs out, and throws the last failure", async () => {
+  it("gives up when the budget runs out, and says so in its own type", async () => {
     fetchMock.mockResolvedValue(reply(502, null, false));
 
     const result = (await settle(wakeApi(undefined, { budgetMs: 10_000 }))) as {
@@ -112,7 +112,12 @@ describe("wakeApi", () => {
     };
 
     expect(result.ok).toBe(false);
-    expect((result.error as ApiError).status).toBe(502);
+    // **Not an ApiError.** Whatever renders a failure must be able to tell
+    // "still starting" from "answered something", because `request failed
+    // with 502` reached the screen once already, on this very path.
+    expect(result.error).toBeInstanceOf(StillWaking);
+    expect((result.error as StillWaking).last).toBeInstanceOf(ApiError);
+    expect(((result.error as StillWaking).last as ApiError).status).toBe(502);
     // Bounded: 1s, 2s, 3s, 4s between attempts against a ten-second budget.
     // The exact count matters less than that it is small and finite -- an
     // unbounded poll against a sleeping instance is a request storm.
@@ -127,5 +132,51 @@ describe("wakeApi", () => {
     await settle(wakeApi((state) => seen.push(state.attempt)));
 
     expect(seen).toEqual([1, 2]);
+  });
+});
+
+describe("keepTrying, which is what the page actually uses", () => {
+  it("retries the caller's own operation rather than a cheaper proxy for it", async () => {
+    // The defect this replaces: poll `/api/v1/health` until it answers, then
+    // make ONE unprotected call to the thing the page needs. Health is
+    // `SELECT 1` and exempt from the limiter; the first real request builds a
+    // connection pool. A starting container serves one and not the other, and
+    // the screen printed `request failed with 502` after 51 seconds of saying
+    // "waking".
+    let calls = 0;
+    const operation = vi.fn(() => {
+      calls += 1;
+      return calls < 4
+        ? Promise.reject(new ApiError(502, null))
+        : Promise.resolve("the real answer");
+    });
+
+    const result = (await settle(keepTrying(operation))) as { ok: boolean; value: unknown };
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe("the real answer");
+    expect(operation).toHaveBeenCalledTimes(4);
+  });
+
+  it("hands each attempt a signal, so one hung call cannot eat the budget", async () => {
+    const seen: AbortSignal[] = [];
+    await settle(
+      keepTrying((signal) => {
+        seen.push(signal);
+        return Promise.resolve("ok");
+      }),
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBeInstanceOf(AbortSignal);
+  });
+
+  it("rethrows anything that is not a cold start, untouched", async () => {
+    const boom = new ApiError(500, null);
+    const result = (await settle(
+      keepTrying(() => Promise.reject(boom)),
+    )) as { ok: boolean; error: unknown };
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(boom);
   });
 });

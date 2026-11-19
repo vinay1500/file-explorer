@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "./api/client";
 import { signOut, whoAmI, type WhoAmI } from "./api/session";
-import { isColdStart, wakeApi, WAKE_BUDGET_MS, type WakeState } from "./api/wake";
+import { StillWaking, isColdStart, keepTrying, WAKE_BUDGET_MS, type WakeState } from "./api/wake";
 import { AuthPanel } from "./auth/AuthPanel";
 import { Explorer } from "./tree/Explorer";
 import { MoonGlyph, SunGlyph } from "./ui/icons";
@@ -32,6 +32,20 @@ type State =
   | { kind: "failed"; message: string; status?: number; canWake: boolean };
 
 function describe(error: unknown): State {
+  // **`request failed with 502` must never reach the screen.** It did, on the
+  // give-up path, after M8 had deleted it from the first-attempt path: the
+  // waiting panel counted to 51 seconds and then printed the one string this
+  // work exists to remove. A status code is not a sentence.
+  if (error instanceof StillWaking) {
+    return {
+      kind: "failed",
+      canWake: true,
+      message:
+        `The server is taking longer than usual to wake up. I waited ` +
+        `${String(Math.round(error.waitedMs / 1000))} seconds. It's a free instance, so this ` +
+        `happens; another go usually catches it.`,
+    };
+  }
   if (error instanceof ApiError) {
     if (error.status === 503) {
       return {
@@ -43,7 +57,15 @@ function describe(error: unknown): State {
           "If you're seeing this, something is genuinely broken and I'd like to know.",
       };
     }
-    return { kind: "failed", status: error.status, canWake: isColdStart(error), message: error.message };
+    if (isColdStart(error)) {
+      return {
+        kind: "failed",
+        status: error.status,
+        canWake: true,
+        message: "The server didn't answer. It may still be starting up.",
+      };
+    }
+    return { kind: "failed", status: error.status, canWake: false, message: error.message };
   }
   return {
     kind: "failed",
@@ -66,44 +88,37 @@ export function App() {
   }, [theme]);
 
   const resolve = useCallback(async (): Promise<void> => {
+    // **One operation, retried, with one deadline over the whole thing.**
+    //
+    // The version before this polled `/api/v1/health` until it answered and
+    // then made a single unprotected call to `/api/v1/auth/me`. Health is
+    // `SELECT 1` and exempt from the rate limiter; the first real request
+    // builds a connection pool and loads the ORM. A starting container can
+    // serve one and not the other, and when that happened the screen printed
+    // `request failed with 502` after fifty-one seconds of saying "waking".
+    //
+    // So the thing being waited for is now the thing the page renders.
+    // `/api/v1/auth/me` carries no rate limit, which is what makes polling it
+    // honest rather than expensive, and a 401 from it is a success.
+    if (waking.current) return;
+    waking.current = true;
     try {
-      const who = await whoAmI();
+      const who = await keepTrying(
+        (signal) => whoAmI(signal),
+        (s: WakeState) => {
+          // The first attempt gets no waiting panel: on a warm instance it
+          // answers in a third of a second and a flash of "waking the server"
+          // would be a lie about what is happening.
+          if (s.attempt > 1) {
+            setState({ kind: "waking", seconds: Math.round(s.elapsedMs / 1000) });
+          }
+        },
+      );
       setState(who ? { kind: "signed-in", who } : { kind: "anonymous" });
     } catch (error: unknown) {
-      // **A wake already in flight wins, and the second caller says nothing.**
-      //
-      // The first version of this branch reported the failure instead, and
-      // that is a defect you can see: React's StrictMode invokes effects
-      // twice in development, so the second `whoAmI()` also 502s, finds the
-      // ref set, and replaces the waiting panel with
-      // `request failed with 502 (HTTP 502)` -- the exact string this
-      // milestone exists to delete -- while the first wake keeps polling
-      // invisibly behind it. Found by Gate 3, which rendered the component
-      // inside StrictMode; the browser suite cannot see it at all, because
-      // Playwright serves a production build where StrictMode does not
-      // double-invoke.
-      //
-      // It is not only a development concern: pressing "Wake it and try
-      // again" during a wake is the same race with a user's finger instead
-      // of StrictMode.
-      if (waking.current) return;
-      if (!isColdStart(error)) {
-        setState(describe(error));
-        return;
-      }
-      waking.current = true;
-      setState({ kind: "waking", seconds: 0 });
-      try {
-        await wakeApi((s: WakeState) => {
-          setState({ kind: "waking", seconds: Math.round(s.elapsedMs / 1000) });
-        });
-        const who = await whoAmI();
-        setState(who ? { kind: "signed-in", who } : { kind: "anonymous" });
-      } catch (wakeError: unknown) {
-        setState(describe(wakeError));
-      } finally {
-        waking.current = false;
-      }
+      setState(describe(error));
+    } finally {
+      waking.current = false;
     }
   }, []);
 
@@ -171,8 +186,8 @@ export function App() {
             <h2 className="panel-h">Waking the server up</h2>
             <p className="muted">
               It&rsquo;s on a free plan, so it sleeps when nobody has used it for fifteen
-              minutes. Waking it takes about half a minute. Nothing&rsquo;s broken, it&rsquo;s
-              just booting.
+              minutes. Waking it usually takes under a minute, sometimes two. Nothing&rsquo;s
+              broken, it&rsquo;s just booting, and I keep asking until it answers.
             </p>
             <div className="wake-bar" aria-hidden="true">
               <i style={{ width: `${String(Math.min(100, (state.seconds / budgetSeconds) * 100))}%` }} />
@@ -190,7 +205,7 @@ export function App() {
             */}
             <p className="mono-small" role="status" aria-live="polite">
               Still waking. About {Math.max(0, Math.round(state.seconds / 10) * 10)} seconds so
-              far, and I give up at {budgetSeconds}.
+              far.
             </p>
             <p className="mono-small" aria-hidden="true">
               {state.seconds}s elapsed
