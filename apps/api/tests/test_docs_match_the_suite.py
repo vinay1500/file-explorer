@@ -269,9 +269,17 @@ def test_the_book_index_counts_its_own_chapters() -> None:
     )
 
     words = {
-        "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
-        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
-        "nineteen": 19, "twenty": 20,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+        "thirteen": 13,
+        "fourteen": 14,
+        "fifteen": 15,
+        "sixteen": 16,
+        "seventeen": 17,
+        "eighteen": 18,
+        "nineteen": 19,
+        "twenty": 20,
     }
     text = index.read_text(encoding="utf-8")
     stated = re.search(r"\b([A-Z][a-z]+) of twenty are written", text)

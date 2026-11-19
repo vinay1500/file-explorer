@@ -58,7 +58,7 @@ reviewer cares about.
 | # | Finding | Closed by |
 |---|---|---|
 | F-09 | A committed virtualenv at `backend/bin/` and `backend/lib/python3.12/site-packages/`, and **no `.gitignore` at all**. The repository was 11,758 KB | M1 · history rewritten with `git filter-repo`, history preserved |
-| F-19 | The frontend README contained the literal string `Material-UI (or any other UI library you're using)`, and MUI was not a dependency. The backend README ended mid-instruction inside an unclosed code fence | M7 · a README with a live link in the first paragraph |
+| F-19 | The frontend README still carried Create React App's placeholder sentence, offering `Material-UI` *or any other UI library you happen to be using* — and MUI was not a dependency. The backend README ended mid-instruction inside an unclosed code fence | M7 · a README with a live link in the first paragraph |
 | F-20 | 32 commits across both repositories, every one titled `Update N <file>` or `Create <file>`. One branch each. **Zero pull requests** | M1 onwards · and the first pull request opened by hand came on 19 November 2026 |
 | F-21 | Neither repository had a licence | M0 · MIT |
 | F-10 | The drag library's `canDrop` was passed a callback returning `dropTarget?.droppable`, which replaced **four** of the library's own rules rather than adding one | M6 · there is no `canDrop` prop, and the reason is in the component's docblock |
