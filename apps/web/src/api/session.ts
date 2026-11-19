@@ -101,9 +101,9 @@ export async function signOut(): Promise<void> {
  * it as such would show a sign-in form to someone whose database is simply
  * unreachable.
  */
-export async function whoAmI(): Promise<WhoAmI | null> {
+export async function whoAmI(signal?: AbortSignal): Promise<WhoAmI | null> {
   try {
-    const who = await request<WhoAmI>("/api/v1/auth/me");
+    const who = await request<WhoAmI>("/api/v1/auth/me", signal ? { signal } : {});
     setCsrfToken(who.csrf_token ?? null);
     return who;
   } catch (error) {

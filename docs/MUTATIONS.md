@@ -82,8 +82,9 @@ every command is proven.
 | 33 | the `signal` spread removed from `client.ts` | the client test red | red. The only functional change in that file, and it was deletable with 46 of 46 green | local, Vitest |
 | 34 | the `.tree-root::after` rule deleted entirely | the band test red | red, and **only** that one &mdash; which is the finding: the drop still works without it, so the band is paint, and the affordance needed its own test | local, Chromium |
 | 35 | `subtreeFullyLoaded` inverted in the delete dialog | the unopened-folder test red | red. Deleting the call instead does not typecheck, which is a second guard | local, Chromium |
+| 36 | **The cold-start wait restored to its old shape**: poll `/api/v1/health`, then make one unprotected call to `/api/v1/auth/me` | the new session-retry test red | red, and only that one. This is the defect Vinay hit on 19 November, reproduced on demand | local, Vitest |
 
-Rows 8, 10, 17, 18, 22 and 32 are the ones worth reading.
+Rows 8, 10, 17, 18, 22, 32 and 36 are the ones worth reading.
 
 **Row 22 found a defect in the fix it was testing.** Deleting the padding was
 meant to prove only that the hit-test test could fail. It reddened two further
