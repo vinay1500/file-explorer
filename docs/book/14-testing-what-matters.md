@@ -129,6 +129,81 @@ that had moved.
 
 ---
 
+## The test that aimed at an element
+
+There is a worse failure than a test that cannot fail, and this project shipped
+it.
+
+`drag-to-root.spec.ts` drives a real browser. It opens the app, expands a
+folder, drags a nested folder out to the root, and asserts the **request body**
+is `{"new_parent_id": null}` — not the redraw, because a redraw assertion
+passes against a client that sends `0`, gets a 404 and re-reads an unchanged
+tree. It is a careful test. It was green on every run from the day it was
+written.
+
+The feature it covers was impossible.
+
+The drag library signals *the root* by leaving `dropTargetNode` undefined,
+which happens when the pointer is over the tree's own `<ul>` rather than over
+one of its rows. That `<ul>` was exactly as tall as the sum of its rows. There
+was no part of it a pointer could be over. Measured in the deployed page:
+
+```
+rootBox.h        151.1875
+rowsTotalHeight  151.1875
+elementFromPoint → .tree-root : 0 of 1,368 sampled points
+```
+
+The test passed because it never asked that question. It calls
+`dispatchEvent` on a locator, and `dispatchEvent` delivers the event to the
+element you name. Hit testing — the part of the browser that decides what is
+under a coordinate — is not involved at all.
+
+> **A test aims at an element. A person aims at a point.**
+
+Everything between those two sentences is where this defect lived for four
+days, through a review gate that ran the browser suite ten times, counted its
+flake rate, and downloaded the library to check a comment.
+
+### What the replacement does differently
+
+It never names the target:
+
+```ts
+for (let y = lowestRow + 2; y < box.bottom - 2; y += 4) {
+  for (let x = box.left + 4; x < box.right - 4; x += 24) {
+    if (document.elementFromPoint(x, y) === root) hits += 1;
+  }
+}
+expect(hits).toBeGreaterThan(20);
+```
+
+It asks the document what is under a coordinate, and the drag that follows is
+aimed at a point the probe returned rather than at a selector. If the band ever
+loses its area again — a padding value changed, an overlay moved — the probe
+returns zero and the suite goes red for the reason a person would have hit.
+
+### The rule this leaves behind
+
+Ask of every test: **what does it skip that the real caller cannot?**
+
+- A browser test that dispatches events skips hit testing, focus order and
+  scroll position.
+- An API test that calls the service directly skips routing, serialisation,
+  authentication and the rate limiter.
+- A test that builds its fixture through the same helper the code uses skips
+  whatever that helper gets wrong.
+
+None of those are reasons not to write the test. They are the list of things
+that test is not evidence about — and the honest move is to write that list
+down next to it, because the alternative is what happened here: a green suite
+offered as proof of something it had never examined.
+
+The defect was found by a person opening the page and trying to use it, fifteen
+minutes after it was declared live.
+
+---
+
 ## Coverage, used honestly
 
 96% was the number when it was first measured, and the uncovered 4% was the

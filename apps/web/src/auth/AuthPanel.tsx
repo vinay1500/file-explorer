@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError } from "../api/client";
 import { register, signIn, signInAsGuest } from "../api/session";
+import { isColdStart, wakeApi } from "../api/wake";
 import { MIN_PASSWORD_LENGTH, faultIn } from "./credentials";
 
 /**
@@ -60,6 +61,24 @@ export function AuthPanel({ onSession, onFailure }: Props) {
       await signInAsGuest();
       await onSession();
     } catch (error: unknown) {
+      // **A 502 here is not retried automatically, and that is deliberate.**
+      //
+      // Creating a guest is a POST. A 502 from the edge means the response
+      // never came back; it does not mean the request never arrived. Sending
+      // it again could leave two guest accounts and two seeded trees behind
+      // for one click. So: wake the service with a GET, then ask the person
+      // to press the button again, and let the second account be a second
+      // decision rather than a side effect of ours.
+      if (isColdStart(error)) {
+        setFault("The server was asleep. Waking it…");
+        try {
+          await wakeApi();
+          setFault("The server is awake now. Press Continue as guest again.");
+        } catch (wakeError: unknown) {
+          onFailure(wakeError);
+        }
+        return;
+      }
       onFailure(error);
     } finally {
       setBusy(null);
@@ -104,6 +123,17 @@ export function AuthPanel({ onSession, onFailure }: Props) {
       <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
         {open ? "Hide the account form" : "or use an email address and password"}
       </button>
+
+      {/*
+        One place for a message, and it lives outside the form -- the guest
+        button can fail too, and a notice rendered inside a collapsed form is
+        a notice nobody reads.
+      */}
+      {fault !== null && (
+        <p className="note bad" role="alert">
+          {fault}
+        </p>
+      )}
 
       {open && (
         <>
@@ -169,12 +199,6 @@ export function AuthPanel({ onSession, onFailure }: Props) {
             digit&rdquo; rule: length is the only part of a password that reliably predicts
             strength.
           </p>
-
-          {fault !== null && (
-            <p className="note bad" role="alert">
-              {fault}
-            </p>
-          )}
 
           <button type="submit" className="primary" disabled={busy !== null}>
             {busy === "form"

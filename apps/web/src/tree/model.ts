@@ -61,6 +61,38 @@ export function mergeNodes(
 }
 
 /** Every id at or beneath `id`, among the nodes currently loaded. */
+/**
+ * Is everything under `id` actually known to the client?
+ *
+ * The tree loads children when a folder is opened, so a count taken from
+ * `subtreeIds` is a count of *what has been loaded* and nothing more. The
+ * delete confirmation used that number directly, which meant deleting a
+ * collapsed folder asked "Delete projects?" with no mention of the forty
+ * things inside it -- in a dialog whose entire purpose is to answer "do you
+ * know how many there are". Found by Gate 3.
+ *
+ * A subtree is fully known when every folder in it has had its children
+ * fetched. Files have no children to fetch, so only `droppable` nodes count.
+ */
+export function subtreeFullyLoaded(
+  nodes: NodeModel<NodeData>[],
+  loaded: Set<number>,
+  id: NodeModel["id"],
+): boolean {
+  const ids = subtreeIds(nodes, id);
+  for (const node of nodes) {
+    if (!ids.has(node.id)) continue;
+    if (node.droppable !== true) continue;
+    const numeric = typeof node.id === "number" ? node.id : Number(node.id);
+    if (!loaded.has(numeric)) return false;
+  }
+  // The node itself may not be in `nodes` yet in a malformed state; its own
+  // children still have to have been fetched for the count to mean anything.
+  const self = typeof id === "number" ? id : Number(id);
+  const node = nodes.find((n) => n.id === id);
+  return node?.droppable !== true || loaded.has(self);
+}
+
 export function subtreeIds(nodes: NodeModel<NodeData>[], id: NodeModel["id"]): Set<NodeModel["id"]> {
   const found = new Set<NodeModel["id"]>([id]);
   let grew = true;

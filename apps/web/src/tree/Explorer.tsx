@@ -15,7 +15,15 @@ import {
   UpToRootGlyph,
 } from "../ui/icons";
 import { kindOf } from "../ui/fileKind";
-import { ROOT_ID, mergeNodes, subtreeIds, toParentId, toTreeNode, type NodeData } from "./model";
+import {
+  ROOT_ID,
+  mergeNodes,
+  subtreeFullyLoaded,
+  subtreeIds,
+  toParentId,
+  toTreeNode,
+  type NodeData,
+} from "./model";
 
 type Tn = NodeModel<NodeData>;
 
@@ -67,11 +75,15 @@ type Tn = NodeModel<NodeData>;
  * container itself. The Playwright test passed because `dispatchEvent` names
  * its target directly and skips hit testing entirely.
  *
- * The fix is `padding-bottom` on that same container, with the band drawn in
- * it by `::after` -- a pseudo-element is part of its originating element for
- * hit testing, so the pointer still lands on the `<ul>`. Not a child element:
- * a child would be the topmost target under the pointer, and react-dnd would
- * have to bubble through it.
+ * The fix is `padding-bottom` on that same container: **the padding box is
+ * the hit area**, and a point inside it resolves to the `<ul>` itself. The
+ * dashed band drawn there by `::after` is paint and nothing else -- it
+ * carries `pointer-events: none`, and deleting the whole rule leaves the drop
+ * working and all three browser tests green. It is there so a person can see
+ * where to aim, which is a different job from being the target, and an
+ * earlier version of this comment credited it with both. Not a child
+ * element: a child would be the topmost target under the pointer, and
+ * react-dnd would have to bubble through it.
  *
  * Every row that is not already at the top level also carries a **Move to top
  * level** button, because a drag is not an affordance for a keyboard, and
@@ -96,6 +108,7 @@ export function Explorer() {
   const [newName, setNewName] = useState("");
   const [confirming, setConfirming] = useState<Tn | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const returnFocusTo = useRef<HTMLElement | null>(null);
 
   const report = useCallback((e: unknown) => {
     setNotice(null);
@@ -126,11 +139,22 @@ export function Explorer() {
     void loadRoots();
   }, [loadRoots]);
 
-  // Move focus into the confirmation when it opens. Without this a keyboard
-  // user tabs straight past Delete and Cancel back into the row buttons.
+  // Move focus into the confirmation when it opens, and remember where it
+  // came from. Without the first a keyboard user tabs straight past Delete
+  // and Cancel back into the row buttons; without the second, cancelling
+  // drops focus onto `<body>` and the next Tab starts again from the top of
+  // the page -- which, in a tree of forty rows, loses your place entirely.
   useEffect(() => {
-    if (confirming !== null) confirmRef.current?.focus();
+    if (confirming === null) return;
+    returnFocusTo.current = document.activeElement as HTMLElement | null;
+    confirmRef.current?.focus();
   }, [confirming]);
+
+  const dismissConfirm = useCallback(() => {
+    setConfirming(null);
+    returnFocusTo.current?.focus();
+    returnFocusTo.current = null;
+  }, []);
 
   const wakeAndReload = async () => {
     setBusy(true);
@@ -310,6 +334,10 @@ export function Explorer() {
   };
 
   const descendantCount = confirming ? subtreeIds(nodes, confirming.id).size - 1 : 0;
+  // Whether that number means anything. A collapsed folder's children have
+  // never been fetched, so the count is zero and the dialog would quietly
+  // promise that nothing is inside.
+  const countIsKnown = confirming !== null && subtreeFullyLoaded(nodes, loaded, confirming.id);
   const rootCount = nodes.filter((n) => n.parent === ROOT_ID).length;
 
   return (
@@ -517,25 +545,39 @@ export function Explorer() {
       */}
       {confirming !== null && (
         <div className="confirm" role="alertdialog" aria-label="Confirm delete"
+          aria-describedby="confirm-q"
           onKeyDown={(e) => {
-            if (e.key === "Escape") setConfirming(null);
+            if (e.key === "Escape") dismissConfirm();
           }}>
-          <p>
+          <p id="confirm-q">
             Delete <strong>{confirming.text}</strong>
-            {descendantCount > 0 && (
+            {countIsKnown ? (
+              descendantCount > 0 && (
+                <>
+                  {" "}
+                  and <strong>{descendantCount}</strong> item
+                  {descendantCount === 1 ? "" : "s"} inside it
+                </>
+              )
+            ) : (
               <>
                 {" "}
-                and <strong>{descendantCount}</strong> item
-                {descendantCount === 1 ? "" : "s"} inside it
+                and <strong>everything inside it</strong>
               </>
             )}
             ?
           </p>
+          {!countIsKnown && (
+            <p className="muted">
+              This folder has not been opened, so the exact number is not known here. The server
+              deletes the whole subtree and reports how many it removed.
+            </p>
+          )}
           <p className="muted">This cannot be undone.</p>
           <button type="button" ref={confirmRef} className="danger" onClick={() => void commitDelete()} disabled={busy}>
             Delete
           </button>
-          <button type="button" className="ghost" onClick={() => setConfirming(null)}>
+          <button type="button" className="ghost" onClick={dismissConfirm}>
             Cancel
           </button>
         </div>

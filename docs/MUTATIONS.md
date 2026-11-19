@@ -74,8 +74,16 @@ every command is proven.
 | 25 | the 401-after-register message replaced with "Account created." | the "never claims the account was created" test red | red | local, Vitest |
 | 26 | the move-to-top button's condition inverted, `!atTop` → `atTop` | its browser test red | red, and only that one | local, Chromium |
 | 27 | 502 dropped from `isColdStart` | the cold-start browser test red | red; the 503 test stayed green, which is the distinction that matters | local, Chromium |
+| 28 | `/api/v1/auth/login` changed to a typo | the session test red | red. **Before Gate 3 this mutation passed 46 of 46**, because the only test touching sign-in mocked the whole module | local, Vitest |
+| 29 | `signIn` stops adopting the CSRF token | the session test red | red. Also passed 46 of 46 before Gate 3, and the result would have been a session that cannot perform a single write | local, Vitest |
+| 30 | the `mode === "create"` guard deleted, so every sign-in also registers | the AuthPanel test red | red. The mutation is a real defect: unauthenticated account creation for any typed address, and two of ten attempts a minute per press | local, Vitest |
+| 31 | the theme default inverted to dark | theme and App tests red | red, 5 of 9. Nothing covered D-27 before Gate 3 | local, Vitest |
+| 32 | **the StrictMode wake race reintroduced** (`if (waking.current) return` folded back into the error branch) | the App test red | red, and only that one. This is the BLOCK Gate 3 found; the browser suite **cannot** see it, because Playwright serves a production build where StrictMode does not double-invoke | local, Vitest |
+| 33 | the `signal` spread removed from `client.ts` | the client test red | red. The only functional change in that file, and it was deletable with 46 of 46 green | local, Vitest |
+| 34 | the `.tree-root::after` rule deleted entirely | the band test red | red, and **only** that one &mdash; which is the finding: the drop still works without it, so the band is paint, and the affordance needed its own test | local, Chromium |
+| 35 | `subtreeFullyLoaded` inverted in the delete dialog | the unopened-folder test red | red. Deleting the call instead does not typecheck, which is a second guard | local, Chromium |
 
-Rows 8, 10, 17, 18 and 22 are the ones worth reading.
+Rows 8, 10, 17, 18, 22 and 32 are the ones worth reading.
 
 **Row 22 found a defect in the fix it was testing.** Deleting the padding was
 meant to prove only that the hit-test test could fail. It reddened two further
@@ -86,6 +94,15 @@ own padding box either way -- a pseudo-element is never what
 `elementFromPoint` returns -- so the drop still works, and the band can no
 longer intercept anything if the padding above it is ever reduced. Verified by
 re-running the suite, not by reasoning about it.
+
+**Rows 28 to 35 are Gate 3's.** Six of them passed the whole suite before that
+review: the login path could be mistyped, the CSRF token could stop being
+captured, every sign-in could silently register an account, the theme could
+invert, the abort signal could be deleted and the visible drop band could be
+removed, all with a green run. Row 32 is the one to remember -- the defect it
+restores is invisible to the browser suite by construction, because Playwright
+serves a production build and the bug only exists under React's development
+StrictMode.
 
 **8** is a test that could not fail, found by mutation and by nothing else.
 

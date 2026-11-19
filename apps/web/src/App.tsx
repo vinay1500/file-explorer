@@ -70,7 +70,24 @@ export function App() {
       const who = await whoAmI();
       setState(who ? { kind: "signed-in", who } : { kind: "anonymous" });
     } catch (error: unknown) {
-      if (!isColdStart(error) || waking.current) {
+      // **A wake already in flight wins, and the second caller says nothing.**
+      //
+      // The first version of this branch reported the failure instead, and
+      // that is a defect you can see: React's StrictMode invokes effects
+      // twice in development, so the second `whoAmI()` also 502s, finds the
+      // ref set, and replaces the waiting panel with
+      // `request failed with 502 (HTTP 502)` -- the exact string this
+      // milestone exists to delete -- while the first wake keeps polling
+      // invisibly behind it. Found by Gate 3, which rendered the component
+      // inside StrictMode; the browser suite cannot see it at all, because
+      // Playwright serves a production build where StrictMode does not
+      // double-invoke.
+      //
+      // It is not only a development concern: pressing "Wake it and try
+      // again" during a wake is the same race with a user's finger instead
+      // of StrictMode.
+      if (waking.current) return;
+      if (!isColdStart(error)) {
         setState(describe(error));
         return;
       }
@@ -149,7 +166,7 @@ export function App() {
         )}
 
         {state.kind === "waking" && (
-          <div className="panel center" role="status" aria-live="polite">
+          <div className="panel center">
             <span className="spinner" aria-hidden="true" />
             <h2 className="panel-h">Waking the server</h2>
             <p className="muted">
@@ -159,8 +176,23 @@ export function App() {
             <div className="wake-bar" aria-hidden="true">
               <i style={{ width: `${String(Math.min(100, (state.seconds / budgetSeconds) * 100))}%` }} />
             </div>
-            <p className="mono-small">
-              {state.seconds}s elapsed &middot; giving up at {budgetSeconds}s
+            {/*
+              The live region is this one line and nothing else, and it says
+              the elapsed time rounded to ten seconds.
+
+              `role="status"` on the whole panel re-announced forty words on
+              every poll -- about twenty-two times across a ninety-second
+              wait, which is not progress reporting, it is a screen reader
+              talking over itself. Rounding means roughly one announcement
+              every ten seconds, which is what a person would want to be
+              told.
+            */}
+            <p className="mono-small" role="status" aria-live="polite">
+              waking &mdash; about {Math.max(0, Math.round(state.seconds / 10) * 10)} seconds so
+              far, giving up at {budgetSeconds}
+            </p>
+            <p className="mono-small" aria-hidden="true">
+              {state.seconds}s elapsed
             </p>
           </div>
         )}

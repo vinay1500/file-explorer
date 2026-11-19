@@ -53,15 +53,19 @@ export function isColdStart(error: unknown): boolean {
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("wake cancelled", "AbortError"));
-      },
-      { once: true },
-    );
+    // The listener is removed on the ordinary path too. `{ once: true }`
+    // only removes it when it *fires*, so without this every completed
+    // sleep left a closure attached to the caller's signal -- twenty-two of
+    // them across a ninety-second wait, all holding a dead timer id.
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("wake cancelled", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -93,9 +97,17 @@ export async function wakeApi(
     attempt += 1;
     onState?.({ attempt, elapsedMs: now() - started });
     try {
-      return await request<Health>("/api/v1/health", {
-        signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
-      });
+      // The caller's signal is combined with the per-attempt timeout rather
+      // than only consulted between attempts: an abort during a request that
+      // is already in flight must cancel *that request*, not wait up to
+      // fifteen seconds for it to time out first. Gate 3 found this path
+      // dead.
+      const deadline = AbortSignal.timeout(ATTEMPT_TIMEOUT_MS);
+      const signal =
+        options.signal === undefined
+          ? deadline
+          : AbortSignal.any([options.signal, deadline]);
+      return await request<Health>("/api/v1/health", { signal });
     } catch (error: unknown) {
       last = error;
       if (options.signal?.aborted === true) throw error;

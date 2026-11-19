@@ -114,6 +114,26 @@ describe("AuthPanel", () => {
     });
   });
 
+  it("does not register when the mode is sign-in", async () => {
+    // Deleting the `mode === "create"` guard made every sign-in attempt also
+    // POST /auth/register, and the suite stayed green: unauthenticated
+    // account creation for any address somebody types, and two of the ten
+    // attempts a minute spent per press. Gate 3 found it by running the
+    // mutation.
+    const user = userEvent.setup();
+    panel();
+    await openForm(user);
+
+    await user.type(screen.getByLabelText("Email"), "person@example.com");
+    await user.type(screen.getByLabelText("Password"), "a sufficiently long one");
+    await user.click(within(form()).getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(session.signIn).toHaveBeenCalledOnce();
+    });
+    expect(session.register).not.toHaveBeenCalled();
+  });
+
   it("catches a short password before spending a request on it", async () => {
     const user = userEvent.setup();
     panel();

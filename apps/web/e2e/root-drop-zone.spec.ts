@@ -13,9 +13,13 @@ import { expect, test, type JSHandle, type Locator, type Page, type Route } from
  * was green, because the test aimed at an element and a person aims at a
  * point.
  *
- * So this file never names the drop target. It asks the document what is under
- * a coordinate, the way a browser does during a drag, and fails if the answer
- * is not the tree's container.
+ * So the first test here never names the drop target: it asks the document
+ * what is under each coordinate, the way a browser does during a drag, and
+ * fails if nothing below the last row belongs to the container. The drag that
+ * follows is aimed at a point that probe returned. The dispatch still has to
+ * name an element -- that is the only way to drive HTML5 drag events from
+ * Playwright at all -- and what makes this file honest is the probe in front
+ * of it, not the dispatch.
  */
 
 const WHOAMI = { id: 1, email: "guest@guests.invalid", csrf_token: "test-token" };
@@ -96,10 +100,14 @@ async function dragToPoint(
   const dataTransfer: JSHandle<DataTransfer> = await page.evaluateHandle(() => new DataTransfer());
   await source.dispatchEvent("dragstart", { dataTransfer });
 
-  // The target is whatever the browser says is under that point -- never a
-  // selector. If the band stops being hit-testable this resolves to a row and
-  // the assertion at the end fails, which is the regression this file exists
-  // to catch.
+  // `at` came from `probeRootBand`, which asked the document what is under
+  // each coordinate, so the aiming is what a pointer would do and the probe
+  // fails first if nothing there belongs to the container.
+  //
+  // The dispatch itself names the element, because `dispatchEvent` is the
+  // only way to drive HTML5 drag events from Playwright. An earlier version
+  // of this comment claimed the target was never a selector, directly above a
+  // line that selects one.
   const target = page.locator(".tree-root");
   await target.dispatchEvent("dragenter", { dataTransfer });
   await target.dispatchEvent("dragover", { dataTransfer, clientX: at.x, clientY: at.y });
@@ -128,6 +136,29 @@ test("the tree's root container has an area a pointer can actually land on", asy
   ).toBeGreaterThan(20);
 });
 
+test("the band that tells a person where to aim is actually drawn", async ({ page }) => {
+  const captured: Captured = { bodies: [] };
+  await stubApi(page, captured);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  // The hit area comes from the container's padding box; the band is paint,
+  // and deleting the whole `::after` rule leaves every other test in this
+  // file green. That would make the affordance -- the only thing on screen
+  // telling a visitor the gesture exists -- untested, which is how F-62
+  // survived: the capability was there and nothing said so.
+  const band = await page.evaluate(() => {
+    const root = document.querySelector(".tree-root");
+    if (!root) return null;
+    const after = window.getComputedStyle(root, "::after");
+    return { content: after.content, height: parseFloat(after.height) };
+  });
+
+  expect(band).not.toBeNull();
+  expect(band!.content).toContain("top level");
+  expect(band!.height).toBeGreaterThan(20);
+});
+
 test("a drop aimed at that area moves the folder to the root", async ({ page }) => {
   const captured: Captured = { bodies: [] };
   await stubApi(page, captured);
@@ -143,6 +174,22 @@ test("a drop aimed at that area moves the folder to the root", async ({ page }) 
 
   await expect.poll(() => captured.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
   expect(captured.bodies[0]).toEqual({ new_parent_id: null });
+});
+
+test("deleting a folder nobody has opened does not promise it is empty", async ({ page }) => {
+  const captured: Captured = { bodies: [] };
+  await stubApi(page, captured);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  // `projects` has a child and the client has never fetched it, so the count
+  // this dialog can compute is zero. A dialog whose whole job is "do you know
+  // how many there are" must not answer that with silence.
+  await page.getByRole("button", { name: "Delete projects" }).click();
+
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("everything inside it");
+  await expect(dialog).toContainText("has not been opened");
 });
 
 test("the move-to-top button does it without a drag at all", async ({ page }) => {
