@@ -57,7 +57,30 @@ export function mergeNodes(
 ): NodeModel<NodeData>[] {
   const byId = new Map(existing.map((n) => [n.id, n]));
   for (const node of incoming) byId.set(node.id, node);
-  return [...byId.values()];
+  return forDisplay([...byId.values()]);
+}
+
+/**
+ * Folders first, then files, each alphabetically.
+ *
+ * This is a *display* order and nothing more: the server's own ordering is by
+ * name, it is what the pagination cursor encodes, and none of that changes
+ * here. The client holds every page before it draws anything, so sorting the
+ * merged list cannot make a row appear twice or go missing.
+ *
+ * It is here because of what the mixed order looked like. A file sitting
+ * between two folders, with an expanded folder above it, reads as being
+ * *inside* that folder - and every file manager anybody has used puts folders
+ * first, so the mixed version looked broken rather than merely different.
+ *
+ * `localeCompare` rather than `<`, so that accented names sort where a person
+ * expects rather than where their code points fall.
+ */
+export function forDisplay(nodes: NodeModel<NodeData>[]): NodeModel<NodeData>[] {
+  return [...nodes].sort((a, b) => {
+    if (a.droppable !== b.droppable) return a.droppable === true ? -1 : 1;
+    return a.text.localeCompare(b.text, undefined, { numeric: true, sensitivity: "base" });
+  });
 }
 
 /** Every id at or beneath `id`, among the nodes currently loaded. */

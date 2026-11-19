@@ -39,8 +39,8 @@ function describe(error: unknown): State {
         status: 503,
         canWake: false,
         message:
-          "The API is running but cannot reach its database. Waiting will not fix this one — " +
-          "it is the condition the April 2025 deployment was in for seventeen months.",
+          "The server is up but it cannot reach its database. Waiting will not help with this " +
+          "one. If you are seeing it, something is genuinely broken and I would like to know.",
       };
     }
     return { kind: "failed", status: error.status, canWake: isColdStart(error), message: error.message };
@@ -48,7 +48,7 @@ function describe(error: unknown): State {
   return {
     kind: "failed",
     canWake: true,
-    message: "Could not reach the API. Nothing answered the request.",
+    message: "I could not reach the server. Nothing answered at all.",
   };
 }
 
@@ -132,7 +132,7 @@ export function App() {
           <span className="mark" aria-hidden="true" />
           <div>
             <h1>File Explorer</h1>
-            <p className="tag">A hierarchical folder tree, with the moves the server refuses</p>
+            <p className="tag">A folder tree you can drag things around in. I rebuilt it from scratch.</p>
           </div>
         </div>
         <div className="top-right">
@@ -161,17 +161,18 @@ export function App() {
         {state.kind === "resolving" && (
           <div className="panel center" role="status">
             <span className="spinner" aria-hidden="true" />
-            <p className="muted">Checking for a session…</p>
+            <p className="muted">Checking whether you are already signed in.</p>
           </div>
         )}
 
         {state.kind === "waking" && (
           <div className="panel center">
             <span className="spinner" aria-hidden="true" />
-            <h2 className="panel-h">Waking the server</h2>
+            <h2 className="panel-h">Waking the server up</h2>
             <p className="muted">
-              This instance is free, so it sleeps after fifteen idle minutes and the first request
-              starts it again. It usually takes 30&ndash;60 seconds.
+              It runs on a free plan, so it goes to sleep when nobody has used it for fifteen
+              minutes. Starting it again takes about half a minute. Nothing is broken; it is just
+              booting.
             </p>
             <div className="wake-bar" aria-hidden="true">
               <i style={{ width: `${String(Math.min(100, (state.seconds / budgetSeconds) * 100))}%` }} />
@@ -188,8 +189,8 @@ export function App() {
               told.
             */}
             <p className="mono-small" role="status" aria-live="polite">
-              waking &mdash; about {Math.max(0, Math.round(state.seconds / 10) * 10)} seconds so
-              far, giving up at {budgetSeconds}
+              Still waking. About {Math.max(0, Math.round(state.seconds / 10) * 10)} seconds so
+              far. I give up at {budgetSeconds}.
             </p>
             <p className="mono-small" aria-hidden="true">
               {state.seconds}s elapsed
@@ -222,11 +223,8 @@ export function App() {
       </main>
 
       <footer className="bottom">
-        <span>
-          Flask &middot; PostgreSQL &middot; React &middot; TypeScript &mdash; one origin, session
-          cookie, no CORS
-        </span>
-        <a href="https://github.com/vinay1500/file-explorer">The code</a>
+        <span>Built with Flask, PostgreSQL, React and TypeScript.</span>
+        <a href="https://github.com/vinay1500/file-explorer">Read the code on GitHub</a>
       </footer>
     </div>
   );

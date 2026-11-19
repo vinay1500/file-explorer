@@ -3,7 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <!--
+      `light` only, and deliberately. The page picks its own theme and offers a
+      toggle; leaving `light dark` here lets the browser paint its own form
+      controls and scrollbars dark before the stylesheet has a say, which is
+      the flicker Vinay saw on a dark-mode machine.
+    -->
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="A folder tree you can drag things around in, built with Flask, PostgreSQL, React and TypeScript."
+    />
     <title>File Explorer</title>
   </head>
   <body>

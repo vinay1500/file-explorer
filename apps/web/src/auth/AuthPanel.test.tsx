@@ -45,7 +45,7 @@ function form() {
 }
 
 async function openForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /email address and password/i }));
+  await user.click(screen.getByRole("button", { name: /sign in with an email/i }));
 }
 
 describe("AuthPanel", () => {
@@ -160,7 +160,7 @@ describe("AuthPanel", () => {
     await user.click(within(form()).getByRole("button", { name: /^sign in$/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/too many attempts/i);
+      expect(screen.getByRole("alert")).toHaveTextContent(/a lot of attempts/i);
     });
   });
 });

@@ -30,15 +30,15 @@ interface Props {
 
 function messageFor(error: unknown, mode: Mode): string {
   if (!(error instanceof ApiError)) {
-    return "That request did not reach the server. Try again.";
+    return "That did not reach the server. Try it again.";
   }
   if (error.status === 401) {
     return mode === "create"
       ? "That address is already taken, or the password does not match it."
-      : "That email and password do not match an account.";
+      : "That email and password do not match an account here.";
   }
   if (error.status === 429) {
-    return "Too many attempts from this address. Wait a minute and try again.";
+    return "That is a lot of attempts. Wait a minute and try again.";
   }
   if (error.status === 422) {
     return error.problem?.detail ?? "The server would not accept those details.";
@@ -70,10 +70,10 @@ export function AuthPanel({ onSession, onFailure }: Props) {
       // to press the button again, and let the second account be a second
       // decision rather than a side effect of ours.
       if (isColdStart(error)) {
-        setFault("The server was asleep. Waking it…");
+        setFault("The server was asleep. I am waking it up.");
         try {
           await wakeApi();
-          setFault("The server is awake now. Press Continue as guest again.");
+          setFault("It is awake now. Press the button again.");
         } catch (wakeError: unknown) {
           onFailure(wakeError);
         }
@@ -110,10 +110,11 @@ export function AuthPanel({ onSession, onFailure }: Props) {
 
   return (
     <div className="gate">
-      <h2 className="gate-h">Open the demo</h2>
+      <h2 className="gate-h">Have a look around</h2>
       <p className="gate-lede">
-        A guest account is a real account with its own seeded tree &mdash; not a shared login.
-        It owns its own rows and can see nobody else&rsquo;s.
+        Press the button and you get your own account with a few folders already in it. It is a
+        real account rather than a shared demo login, so nothing you do here shows up for anyone
+        else, and you can delete whatever you like.
       </p>
 
       <button type="button" className="primary big" onClick={() => void guest()} disabled={busy !== null}>
@@ -121,7 +122,7 @@ export function AuthPanel({ onSession, onFailure }: Props) {
       </button>
 
       <button type="button" className="link" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {open ? "Hide the account form" : "or use an email address and password"}
+        {open ? "Hide the sign-in form" : "Or sign in with an email and password"}
       </button>
 
       {/*
@@ -195,9 +196,8 @@ export function AuthPanel({ onSession, onFailure }: Props) {
           </label>
 
           <p className="hint">
-            At least {MIN_PASSWORD_LENGTH} characters. There is no &ldquo;one capital, one
-            digit&rdquo; rule: length is the only part of a password that reliably predicts
-            strength.
+            At least {MIN_PASSWORD_LENGTH} characters. I do not ask for a capital and a digit,
+            because length is the part of a password that actually makes it hard to guess.
           </p>
 
           <button type="submit" className="primary" disabled={busy !== null}>
@@ -210,9 +210,9 @@ export function AuthPanel({ onSession, onFailure }: Props) {
 
           {mode === "create" && (
             <p className="hint">
-              The API answers the same way whether or not the address was free, so that nobody can
-              use this form to find out who has an account. If the address is taken, the sign-in
-              that follows will say so.
+              The server replies the same way whether or not that address was already taken, so
+              nobody can use this form to find out who has an account here. If it is taken, the
+              sign-in straight afterwards will tell you.
             </p>
           )}
         </form>
