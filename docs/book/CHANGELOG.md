@@ -5,6 +5,9 @@ statement stays and a new row explains what is true instead — with the date it
 
 | Date | Change | Why |
 |---|---|---|
+| 2026-11-19 | **Chapters 1, 2, 8, 18 and 19 written — twenty of twenty.** The five had carried milestone markers in the index (M3, M4, M5) and had never been tasks in any of them | The index read as a schedule and was not one; found by auditing the index against the task list rather than against the directory |
+| 2026-11-19 | The index's chapter count is now checked by a test, along with every chapter being linked | It had been wrong twice, both times incremented rather than counted — once in the file whose opening line is "three rules keep it honest" |
+| 2026-11-19 | Chapter 14 gained *The test that aimed at an element*: a browser test stayed green for four days while the gesture it covered was impossible, because `dispatchEvent` skips hit testing | F-62, found by using the deployed demo rather than by any instrument |
 | 2025-04-18 | Project started as two repositories — Flask API and a Create React App frontend | Original build |
 | 2025-04-21 | Deployed: API on Render, frontend on Vercel, PostgreSQL on Render's free tier | Original build |
 | ~2025-06 | Database became unreachable; the demo silently served an empty tree | Cause established at M0; see [chapter 7](07-the-silent-outage.md) |
