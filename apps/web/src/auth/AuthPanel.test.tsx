@@ -108,9 +108,7 @@ describe("AuthPanel", () => {
     await user.click(within(form()).getByRole("button", { name: /^sign in$/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(
-        /do not match an account/i,
-      );
+      expect(screen.getByRole("alert")).toHaveTextContent(/don't match an account/i);
     });
   });
 

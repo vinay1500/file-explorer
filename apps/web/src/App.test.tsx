@@ -64,7 +64,7 @@ describe("a cold start under StrictMode", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/cannot reach its database/);
+      expect(screen.getByRole("alert")).toHaveTextContent(/can't reach its database/);
     });
     expect(screen.queryByText(/Waking the server/)).not.toBeInTheDocument();
   });
