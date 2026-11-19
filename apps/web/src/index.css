@@ -30,6 +30,8 @@
   --bad: #b3261e;
   --bad-soft: #fdeceb;
   --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 8px 24px rgb(16 24 40 / 6%);
+  --guide: #d7dde5;
+  --step: 22px;
 
   --k-pdf: #c2362c;
   --k-image: #7a3fb8;
@@ -60,6 +62,7 @@
   --bad: #ff8d84;
   --bad-soft: #351a18;
   --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px rgb(0 0 0 / 32%);
+  --guide: #333c49;
 
   --k-pdf: #ff8d84;
   --k-image: #c79bff;
@@ -546,6 +549,20 @@ button.link {
   background: var(--accent-soft);
 }
 
+/*
+ * Rows, and the guides that say which folder a row is in.
+ *
+ * The first version drew a single dotted riser at the parent's column, which
+ * was not enough: a file at the top level sitting under an expanded folder
+ * read as being *inside* that folder, because nothing on screen separated
+ * "level 0" from "level 1 of the thing above". Vinay reported exactly that
+ * after using it.
+ *
+ * So now every level gets a riser, drawn as a repeating gradient sized to the
+ * row's own depth, plus a short tick into the row's icon. A row at depth 0 has
+ * no guides at all, which is what makes depth 0 legible: the top-level rows
+ * are the ones with clean space to their left.
+ */
 .row {
   position: relative;
   display: flex;
@@ -554,22 +571,25 @@ button.link {
   height: 34px;
   padding-inline-end: 0.4rem;
   border-radius: 7px;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--guide) 0 1px,
+    transparent 1px var(--step)
+  );
+  background-repeat: no-repeat;
+  background-position: 15px 0;
+  background-size: calc(var(--depth, 0) * var(--step)) 100%;
 }
 
-/*
- * The indent guide: one dotted riser per nested row, at its parent's column.
- *
- * The class decides whether it is drawn, not a selector matching the inline
- * style string -- `[style*="--depth:0"]` depends on how the browser chooses
- * to serialise a custom property, which is not something to build a layout on.
- */
+/* The tick that joins a row to its parent's riser. */
 .row.indented::before {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc((var(--depth, 1) - 1) * 20px + 16px);
-  border-left: 1px dotted var(--line-strong);
+  top: 50%;
+  width: 9px;
+  height: 1px;
+  background: var(--guide);
+  left: calc((var(--depth, 1) - 1) * var(--step) + 16px);
 }
 
 .row:hover {
@@ -680,6 +700,40 @@ li.tree-drop > .row {
   .actions {
     opacity: 1;
   }
+}
+
+/* The step list under the tree. It was one paragraph; a paragraph is a bad
+   way to tell somebody the four things they can do. */
+.howto {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.howto h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.howto ol {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.howto li {
+  font-size: 0.85rem;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.howto li::marker {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .confirm {

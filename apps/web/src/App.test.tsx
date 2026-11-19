@@ -46,7 +46,7 @@ describe("a cold start under StrictMode", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Waking the server")).toBeInTheDocument();
+      expect(screen.getByText(/Waking the server/)).toBeInTheDocument();
     });
 
     // The second effect invocation must not be able to speak over the first.
@@ -66,7 +66,7 @@ describe("a cold start under StrictMode", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(/cannot reach its database/);
     });
-    expect(screen.queryByText("Waking the server")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Waking the server/)).not.toBeInTheDocument();
   });
 
   it("opens light, whatever the machine prefers", async () => {

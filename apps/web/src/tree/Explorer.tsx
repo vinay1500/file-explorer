@@ -121,7 +121,7 @@ export function Explorer() {
       return;
     }
     setAsleep(false);
-    setError(e instanceof ApiError ? e.message : "The request did not reach the server.");
+    setError(e instanceof ApiError ? e.message : "That did not reach the server.");
   }, []);
 
   const loadRoots = useCallback(async () => {
@@ -158,7 +158,7 @@ export function Explorer() {
 
   const wakeAndReload = async () => {
     setBusy(true);
-    setError("Waking the server…");
+    setError("Waking it up.");
     try {
       await wakeApi();
       setAsleep(false);
@@ -295,7 +295,7 @@ export function Explorer() {
         // Through the notice channel, not `setError`. It was announced with
         // role="alert" in red, which tells a screen-reader user that deleting
         // the thing they asked to delete went wrong.
-        setNotice(`Deleted ${String(result.deleted)} items.`);
+        setNotice(`Deleted ${String(result.deleted)} things.`);
       }
     } catch (e: unknown) {
       report(e);
@@ -343,7 +343,7 @@ export function Explorer() {
   return (
     <section className="explorer panel" aria-busy={busy}>
       <div className="ex-head">
-        <h2 className="panel-h">Your tree</h2>
+        <h2 className="panel-h">Your folders</h2>
         <div className="ex-actions">
           <button
             type="button"
@@ -421,7 +421,7 @@ export function Explorer() {
                 // guide cannot drift away from the row it belongs to.
                 style={
                   {
-                    paddingInlineStart: `${String(depth * 20)}px`,
+                    paddingInlineStart: `calc(${String(depth)} * var(--step))`,
                     "--depth": depth,
                   } as React.CSSProperties
                 }
@@ -515,17 +515,37 @@ export function Explorer() {
 
       {rootCount === 0 && !busy && (
         <p className="empty">
-          Nothing here yet. <strong>New folder</strong> makes the first one.
+          Nothing in here yet. Use <strong>New folder</strong> to make one.
         </p>
       )}
 
-      <p className="hint">
-        Drag a folder onto another to move it, or onto the band below the tree to bring it back to
-        the top level. <strong>A folder cannot be dropped into its own descendant</strong> &mdash;
-        the server answers 409 and says why. Every row that is not already at the top level also
-        has a <UpToRootGlyph className="ic inline" /> button, because a drag is no use to a
-        keyboard.
-      </p>
+      <div className="howto">
+        <h3>What you can do here</h3>
+        <ol>
+          <li>
+            <strong>Open a folder</strong> by clicking the arrow beside it. Its contents load the
+            first time you open it.
+          </li>
+          <li>
+            <strong>Move something into a folder</strong> by dragging it onto that folder.
+          </li>
+          <li>
+            <strong>Move something back to the top level</strong> by dragging it onto the dashed
+            band under the tree, or by clicking <UpToRootGlyph className="ic inline" /> on its
+            row. The button does the same thing without a drag, which matters if you are using a
+            keyboard.
+          </li>
+          <li>
+            <strong>Rename or delete</strong> with the two buttons that appear when you hover a
+            row. Deleting takes everything inside with it, and asks first.
+          </li>
+          <li>
+            <strong>Try to drop a folder inside itself.</strong> It will not let you, and the
+            server is the one that refuses: it answers 409 and says which rule you hit. That bug
+            is the reason this project exists.
+          </li>
+        </ol>
+      </div>
 
       {/*
         The delete confirmation, which the April 2025 client did not have at
@@ -569,11 +589,11 @@ export function Explorer() {
           </p>
           {!countIsKnown && (
             <p className="muted">
-              This folder has not been opened, so the exact number is not known here. The server
-              deletes the whole subtree and reports how many it removed.
+              I have not loaded what is inside this folder, so I cannot tell you how many
+              things there are. All of them go too, and you will see the count afterwards.
             </p>
           )}
-          <p className="muted">This cannot be undone.</p>
+          <p className="muted">You cannot undo this.</p>
           <button type="button" ref={confirmRef} className="danger" onClick={() => void commitDelete()} disabled={busy}>
             Delete
           </button>
