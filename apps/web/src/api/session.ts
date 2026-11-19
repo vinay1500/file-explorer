@@ -6,13 +6,21 @@ import type { Session, WhoAmI } from "./contract";
 export type { WhoAmI };
 
 /**
- * Guest sign-in, and sign-out.
+ * The four ways a session begins or ends.
  *
- * There is deliberately no `signIn` or `register` here. D-24 chose the
- * one-click guest session *over* a form: an interviewer with thirty seconds
- * will not sign up, and a shared demo account with printed credentials is one
- * password for every visitor. Shipping a `signIn` nothing can reach would be
- * the dead-code finding (F-15) this milestone just closed, in a new file.
+ * **D-24 said one-click guest *instead of* a form**, and this file said so:
+ * an interviewer with thirty seconds will not sign up, and shipping a
+ * `signIn` nothing could reach would have been the dead-code finding (F-15)
+ * in a new file. The first half of that still holds and the guest button is
+ * still the front door.
+ *
+ * The second half stopped being true the moment the demo went live: the API
+ * has had `POST /auth/register` and `POST /auth/login` since M5, both tested,
+ * both rate-limited, both reachable with `curl` — and the only way in through
+ * the browser was a button marked *guest*. That reads as a half-finished
+ * authentication system rather than a deliberate one, which is the opposite
+ * of what M5 was for. **D-26 narrows D-24: guest stays the front door, and
+ * the accounts the API already has are now reachable from it.**
  *
  * Every one of these sets or clears the in-memory CSRF token as part of the
  * same call that changes the session, because the two are one fact. Leaving
@@ -37,6 +45,40 @@ function adopt(session: Session): Session {
  */
 export async function signInAsGuest(): Promise<Session> {
   return adopt(await request<Session>("/api/v1/auth/guest", { method: "POST" }));
+}
+
+/**
+ * Sign in with an email address and a password.
+ *
+ * A 401 here is an ordinary answer, not an exception to hide: the pair did not
+ * match. The server says the same thing for "no such account" and "wrong
+ * password" on purpose, so this function has nothing more specific to offer
+ * and does not invent it.
+ */
+export async function signIn(email: string, password: string): Promise<Session> {
+  return adopt(
+    await request<Session>("/api/v1/auth/login", {
+      method: "POST",
+      body: { email, password },
+    }),
+  );
+}
+
+/**
+ * Create an account.
+ *
+ * **The server answers 202 whether or not the address was free**, with an
+ * identical body, because a 409 would be a working answer to "does this person
+ * have an account" available to anyone. So this returns nothing useful by
+ * design, and the caller must not say "account created" — it does not know
+ * that. The honest next step is to try signing in with the same pair, which
+ * reveals exactly what a sign-in reveals and nothing more.
+ */
+export async function register(email: string, password: string): Promise<void> {
+  await request<{ accepted: boolean }>("/api/v1/auth/register", {
+    method: "POST",
+    body: { email, password },
+  });
 }
 
 export async function signOut(): Promise<void> {

@@ -65,6 +65,13 @@ interface RequestOptions {
   body?: unknown;
   /** Set false to stop the one automatic retry. Used by the retry itself. */
   retryOnCsrfFailure?: boolean;
+  /**
+   * Abort this attempt. The cold-start poll gives each health check fifteen
+   * seconds, because a connection that hangs is indistinguishable from a
+   * service that is still starting and would otherwise consume the whole
+   * waiting budget in one attempt.
+   */
+  signal?: AbortSignal;
 }
 
 async function readProblem(response: Response): Promise<Problem | null> {
@@ -98,6 +105,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     method,
     credentials: "same-origin",
     headers,
+    ...(options.signal !== undefined ? { signal: options.signal } : {}),
     ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
   });
 

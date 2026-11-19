@@ -4,7 +4,26 @@ import { HTML5Backend } from "react-dnd-html5-backend";
 import { Tree, type DropOptions, type NodeModel } from "@minoru/react-dnd-treeview";
 import { ApiError } from "../api/client";
 import { createNode, deleteNode, listChildren, listRoots, moveNode, renameNode } from "../api/nodes";
-import { ROOT_ID, mergeNodes, subtreeIds, toParentId, toTreeNode, type NodeData } from "./model";
+import { isColdStart, wakeApi } from "../api/wake";
+import {
+  BinGlyph,
+  Chevron,
+  FileGlyph,
+  FolderClosed,
+  FolderOpen,
+  PencilGlyph,
+  UpToRootGlyph,
+} from "../ui/icons";
+import { kindOf } from "../ui/fileKind";
+import {
+  ROOT_ID,
+  mergeNodes,
+  subtreeFullyLoaded,
+  subtreeIds,
+  toParentId,
+  toTreeNode,
+  type NodeData,
+} from "./model";
 
 type Tn = NodeModel<NodeData>;
 
@@ -43,6 +62,34 @@ type Tn = NodeModel<NodeData>;
  * actively reject, or it silently takes ownership of correctness it does not
  * implement.
  *
+ * ---
+ *
+ * **F-62: the root rule above was reachable by a test and by nobody else.**
+ *
+ * `dropTargetNode === undefined` means the pointer is over the tree's own
+ * container rather than over a row, and that is how a drag says "the root".
+ * The container is a `<ul>` whose height is exactly the sum of its rows -- so
+ * every pixel of it was covered by a row, and a drag could never produce that
+ * condition. Measured on the deployed site: 1,368 sample points inside the
+ * container, **zero** of which `document.elementFromPoint` resolved to the
+ * container itself. The Playwright test passed because `dispatchEvent` names
+ * its target directly and skips hit testing entirely.
+ *
+ * The fix is `padding-bottom` on that same container: **the padding box is
+ * the hit area**, and a point inside it resolves to the `<ul>` itself. The
+ * dashed band drawn there by `::after` is paint and nothing else -- it
+ * carries `pointer-events: none`, and deleting the whole rule leaves the drop
+ * working and all three browser tests green. It is there so a person can see
+ * where to aim, which is a different job from being the target, and an
+ * earlier version of this comment credited it with both. Not a child
+ * element: a child would be the topmost target under the pointer, and
+ * react-dnd would have to bubble through it.
+ *
+ * Every row that is not already at the top level also carries a **Move to top
+ * level** button, because a drag is not an affordance for a keyboard, and
+ * because the one gesture this whole project is named after should not be
+ * reachable only by mouse.
+ *
  * The client guard is best-effort anyway: children load on expand, so
  * `isAncestor` only sees what has been loaded. **The server is authoritative**
  * -- it answers 409 `CYCLE_DETECTED` from a check inside a row-locked
@@ -52,15 +99,28 @@ export function Explorer() {
   const [nodes, setNodes] = useState<Tn[]>([]);
   const [loaded, setLoaded] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
+  const [asleep, setAsleep] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState<Tn | null>(null);
   const [draft, setDraft] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
   const [confirming, setConfirming] = useState<Tn | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const returnFocusTo = useRef<HTMLElement | null>(null);
 
   const report = useCallback((e: unknown) => {
     setNotice(null);
+    // A cold start is not a failure of the request, it is the absence of a
+    // server to make it to. Saying "request failed with 502" for it is what
+    // the first version did, and it reads as a broken application.
+    if (isColdStart(e)) {
+      setAsleep(true);
+      setError("The server went back to sleep between requests.");
+      return;
+    }
+    setAsleep(false);
     setError(e instanceof ApiError ? e.message : "The request did not reach the server.");
   }, []);
 
@@ -69,6 +129,7 @@ export function Explorer() {
       const items = await listRoots();
       setNodes((current) => mergeNodes(current, items.map(toTreeNode)));
       setError(null);
+      setAsleep(false);
     } catch (e: unknown) {
       report(e);
     }
@@ -78,11 +139,37 @@ export function Explorer() {
     void loadRoots();
   }, [loadRoots]);
 
-  // Move focus into the confirmation when it opens. Without this a keyboard
-  // user tabs straight past Delete and Cancel back into the row buttons.
+  // Move focus into the confirmation when it opens, and remember where it
+  // came from. Without the first a keyboard user tabs straight past Delete
+  // and Cancel back into the row buttons; without the second, cancelling
+  // drops focus onto `<body>` and the next Tab starts again from the top of
+  // the page -- which, in a tree of forty rows, loses your place entirely.
   useEffect(() => {
-    if (confirming !== null) confirmRef.current?.focus();
+    if (confirming === null) return;
+    returnFocusTo.current = document.activeElement as HTMLElement | null;
+    confirmRef.current?.focus();
   }, [confirming]);
+
+  const dismissConfirm = useCallback(() => {
+    setConfirming(null);
+    returnFocusTo.current?.focus();
+    returnFocusTo.current = null;
+  }, []);
+
+  const wakeAndReload = async () => {
+    setBusy(true);
+    setError("Waking the server…");
+    try {
+      await wakeApi();
+      setAsleep(false);
+      setError(null);
+      await loadRoots();
+    } catch (e: unknown) {
+      report(e);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /**
    * Children load when a folder is first opened, through `onChangeOpen` --
@@ -142,22 +229,14 @@ export function Explorer() {
     [loadRoots, report],
   );
 
-  const handleDrop = async (_tree: Tn[], options: DropOptions<NodeData>) => {
-    const sourceId = options.dragSourceId;
-    if (sourceId === undefined) return;
-    const source = nodes.find((n) => n.id === sourceId);
-    if (!source) return;
-
-    const from = toParentId(source.parent);
-    const to = toParentId(options.dropTargetId);
+  const move = async (id: number, from: number | null, to: number | null) => {
     if (from === to) return;
-
     setBusy(true);
     try {
       // `to` is `null` when the destination is the root. The old client looked
       // the target up by id, found nothing for the root, and returned early --
       // which is F-06, and is why nothing could ever be dragged back out.
-      await moveNode(typeof sourceId === "number" ? sourceId : Number(sourceId), to);
+      await moveNode(id, to);
       setError(null);
       await reload([from, to]);
     } catch (e: unknown) {
@@ -168,6 +247,15 @@ export function Explorer() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleDrop = async (_tree: Tn[], options: DropOptions<NodeData>) => {
+    const sourceId = options.dragSourceId;
+    if (sourceId === undefined) return;
+    const source = nodes.find((n) => n.id === sourceId);
+    if (!source) return;
+    const id = typeof sourceId === "number" ? sourceId : Number(sourceId);
+    await move(id, toParentId(source.parent), toParentId(options.dropTargetId));
   };
 
   const commitRename = async () => {
@@ -216,14 +304,27 @@ export function Explorer() {
     }
   };
 
-  /** Create a folder at the root. The only way to add anything to the tree. */
-  const addFolder = async () => {
-    const name = window.prompt("Name for the new folder");
-    if (name === null || name.trim() === "") return;
+  /**
+   * Create a folder at the top level.
+   *
+   * It was a `window.prompt` until M8. That is one line of code and three
+   * problems: Chrome suppresses it outright after a few uses on a page,
+   * Firefox lets the user tick "prevent further dialogs" and then nothing
+   * happens at all, and neither can be styled, focused or cancelled with a
+   * keyboard in the way the rest of this component can.
+   */
+  const commitCreate = async () => {
+    const name = newName.trim();
+    if (name === "") {
+      setAdding(false);
+      return;
+    }
     setBusy(true);
     try {
-      await createNode(name.trim(), "folder", null);
+      await createNode(name, "folder", null);
       setError(null);
+      setAdding(false);
+      setNewName("");
       await loadRoots();
     } catch (e: unknown) {
       report(e);
@@ -233,12 +334,39 @@ export function Explorer() {
   };
 
   const descendantCount = confirming ? subtreeIds(nodes, confirming.id).size - 1 : 0;
+  // Whether that number means anything. A collapsed folder's children have
+  // never been fetched, so the count is zero and the dialog would quietly
+  // promise that nothing is inside.
+  const countIsKnown = confirming !== null && subtreeFullyLoaded(nodes, loaded, confirming.id);
+  const rootCount = nodes.filter((n) => n.parent === ROOT_ID).length;
 
   return (
-    <section className="explorer" aria-busy={busy}>
+    <section className="explorer panel" aria-busy={busy}>
+      <div className="ex-head">
+        <h2 className="panel-h">Your tree</h2>
+        <div className="ex-actions">
+          <button
+            type="button"
+            className="primary small"
+            onClick={() => {
+              setAdding(true);
+              setNewName("");
+            }}
+            disabled={busy || adding}
+          >
+            New folder
+          </button>
+        </div>
+      </div>
+
       {error !== null && (
         <p className="note bad" role="alert">
           {error}
+          {asleep && (
+            <button type="button" className="link" onClick={() => void wakeAndReload()} disabled={busy}>
+              Wake it
+            </button>
+          )}
         </p>
       )}
       {notice !== null && (
@@ -247,11 +375,33 @@ export function Explorer() {
         </p>
       )}
 
-      <p className="toolbar">
-        <button type="button" onClick={() => void addFolder()} disabled={busy}>
-          New folder
-        </button>
-      </p>
+      {adding && (
+        <form
+          className="new-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void commitCreate();
+          }}
+        >
+          <FolderClosed className="ic ic-folder" />
+          <input
+            autoFocus
+            className="rename"
+            aria-label="Name for the new folder"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setAdding(false);
+            }}
+          />
+          <button type="submit" className="primary small" disabled={busy}>
+            Create
+          </button>
+          <button type="button" className="ghost small" onClick={() => setAdding(false)}>
+            Cancel
+          </button>
+        </form>
+      )}
 
       <DndProvider backend={HTML5Backend}>
         <Tree<NodeData>
@@ -260,62 +410,122 @@ export function Explorer() {
           onDrop={(tree, options) => void handleDrop(tree, options)}
           onChangeOpen={(openIds) => void openChanged(openIds)}
           classes={{ root: "tree-root", dropTarget: "tree-drop", draggingSource: "tree-dragging" }}
-          render={(node, { depth, isOpen, onToggle }) => (
-            <div className="row" style={{ paddingInlineStart: `${String(depth * 18)}px` }}>
-              {node.droppable === true ? (
-                <button
-                  type="button"
-                  className="twist"
-                  aria-expanded={isOpen}
-                  aria-label={isOpen ? `Collapse ${node.text}` : `Expand ${node.text}`}
-                  onClick={onToggle}
-                >
-                  {isOpen ? "▾" : "▸"}
-                </button>
-              ) : (
-                <span className="twist" aria-hidden="true" />
-              )}
+          render={(node, { depth, isOpen, onToggle }) => {
+            const isFolder = node.droppable === true;
+            const atTop = node.parent === ROOT_ID;
+            return (
+              <div
+                className={`row ${isFolder ? "is-folder" : "is-file"} ${depth > 0 ? "indented" : ""}`}
+                // `--depth` draws the indent guide; the padding does the
+                // indenting itself. Both come from the same number, so a
+                // guide cannot drift away from the row it belongs to.
+                style={
+                  {
+                    paddingInlineStart: `${String(depth * 20)}px`,
+                    "--depth": depth,
+                  } as React.CSSProperties
+                }
+              >
+                {isFolder ? (
+                  <button
+                    type="button"
+                    className={`twist ${isOpen ? "open" : ""}`}
+                    aria-expanded={isOpen}
+                    aria-label={isOpen ? `Collapse ${node.text}` : `Expand ${node.text}`}
+                    onClick={onToggle}
+                  >
+                    <Chevron />
+                  </button>
+                ) : (
+                  <span className="twist" aria-hidden="true" />
+                )}
 
-              {renaming?.id === node.id ? (
-                <input
-                  className="rename"
-                  autoFocus
-                  value={draft}
-                  aria-label={`New name for ${node.text}`}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onBlur={() => void commitRename()}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void commitRename();
-                    if (e.key === "Escape") setRenaming(null);
-                  }}
-                />
-              ) : (
-                <span className="name">{node.text}</span>
-              )}
+                {isFolder ? (
+                  isOpen ? (
+                    <FolderOpen className="ic ic-folder" />
+                  ) : (
+                    <FolderClosed className="ic ic-folder" />
+                  )
+                ) : (
+                  <FileGlyph className={`ic ic-file k-${kindOf(node.text)}`} />
+                )}
 
-              <span className="actions">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRenaming(node);
-                    setDraft(node.text);
-                  }}
-                  aria-label={`Rename ${node.text}`}
-                >
-                  Rename
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirming(node)}
-                  aria-label={`Delete ${node.text}`}
-                >
-                  Delete
-                </button>
-              </span>
-            </div>
-          )}
+                {renaming?.id === node.id ? (
+                  <input
+                    className="rename"
+                    autoFocus
+                    value={draft}
+                    aria-label={`New name for ${node.text}`}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => void commitRename()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void commitRename();
+                      if (e.key === "Escape") setRenaming(null);
+                    }}
+                  />
+                ) : (
+                  <span className="name">{node.text}</span>
+                )}
+
+                <span className="actions">
+                  {!atTop && (
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() =>
+                        void move(
+                          typeof node.id === "number" ? node.id : Number(node.id),
+                          toParentId(node.parent),
+                          null,
+                        )
+                      }
+                      aria-label={`Move ${node.text} to the top level`}
+                      title="Move to the top level"
+                    >
+                      <UpToRootGlyph />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => {
+                      setRenaming(node);
+                      setDraft(node.text);
+                    }}
+                    aria-label={`Rename ${node.text}`}
+                    title="Rename"
+                  >
+                    <PencilGlyph />
+                  </button>
+                  <button
+                    type="button"
+                    className="icon-btn danger"
+                    onClick={() => setConfirming(node)}
+                    aria-label={`Delete ${node.text}`}
+                    title="Delete"
+                  >
+                    <BinGlyph />
+                  </button>
+                </span>
+              </div>
+            );
+          }}
         />
       </DndProvider>
+
+      {rootCount === 0 && !busy && (
+        <p className="empty">
+          Nothing here yet. <strong>New folder</strong> makes the first one.
+        </p>
+      )}
+
+      <p className="hint">
+        Drag a folder onto another to move it, or onto the band below the tree to bring it back to
+        the top level. <strong>A folder cannot be dropped into its own descendant</strong> &mdash;
+        the server answers 409 and says why. Every row that is not already at the top level also
+        has a <UpToRootGlyph className="ic inline" /> button, because a drag is no use to a
+        keyboard.
+      </p>
 
       {/*
         The delete confirmation, which the April 2025 client did not have at
@@ -335,25 +545,39 @@ export function Explorer() {
       */}
       {confirming !== null && (
         <div className="confirm" role="alertdialog" aria-label="Confirm delete"
+          aria-describedby="confirm-q"
           onKeyDown={(e) => {
-            if (e.key === "Escape") setConfirming(null);
+            if (e.key === "Escape") dismissConfirm();
           }}>
-          <p>
+          <p id="confirm-q">
             Delete <strong>{confirming.text}</strong>
-            {descendantCount > 0 && (
+            {countIsKnown ? (
+              descendantCount > 0 && (
+                <>
+                  {" "}
+                  and <strong>{descendantCount}</strong> item
+                  {descendantCount === 1 ? "" : "s"} inside it
+                </>
+              )
+            ) : (
               <>
                 {" "}
-                and <strong>{descendantCount}</strong> item
-                {descendantCount === 1 ? "" : "s"} inside it
+                and <strong>everything inside it</strong>
               </>
             )}
             ?
           </p>
+          {!countIsKnown && (
+            <p className="muted">
+              This folder has not been opened, so the exact number is not known here. The server
+              deletes the whole subtree and reports how many it removed.
+            </p>
+          )}
           <p className="muted">This cannot be undone.</p>
-          <button type="button" ref={confirmRef} onClick={() => void commitDelete()} disabled={busy}>
+          <button type="button" ref={confirmRef} className="danger" onClick={() => void commitDelete()} disabled={busy}>
             Delete
           </button>
-          <button type="button" className="ghost" onClick={() => setConfirming(null)}>
+          <button type="button" className="ghost" onClick={dismissConfirm}>
             Cancel
           </button>
         </div>

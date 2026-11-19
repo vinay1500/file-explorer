@@ -129,3 +129,26 @@ describe("failures carry the problem document", () => {
     await expect(request("/api/v1/roots")).rejects.toMatchObject({ status: 502, problem: null });
   });
 });
+
+describe("the abort signal", () => {
+  it("is handed to fetch, so a hung attempt can be cut short", async () => {
+    // The cold-start poll gives each health check fifteen seconds. Without
+    // this line the option is accepted, ignored, and one hung connection
+    // consumes the entire ninety-second budget. Gate 3 deleted the spread and
+    // every test still passed, which is why this one exists.
+    fetchMock.mockResolvedValue(reply(200, { status: "ok" }));
+    const controller = new AbortController();
+
+    await request("/api/v1/health", { signal: controller.signal });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
+  });
+
+  it("is absent when no caller asked for one", async () => {
+    fetchMock.mockResolvedValue(reply(200, { status: "ok" }));
+    await request("/api/v1/health");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.signal).toBeUndefined();
+  });
+});

@@ -68,8 +68,41 @@ every command is proven.
 | 19 | The two, reapplied precisely | 2 red | 1 red. The other exposed something else entirely — see below | `43727478366` |
 | 20 | Health exemption removed, against health's own bucket | red | red | `43727642755` |
 | 21 | `new_parent_id` narrowed from `number \| null` to `number` in the generated API types | the web build red | red: `TS2344: Type 'false' does not satisfy the constraint 'true'` | run locally against `tsc 5`, see below |
+| 22 | `padding-bottom` removed from the tree's root container | the hit-test red | red, and **two others with it**: the band is positioned absolutely, so without the padding it lay over the rows and intercepted clicks on their buttons | local, Chromium |
+| 23 | `isColdStart` widened to include 503 | the "stops at once on 503" test red | red: 2 of 9 | local, Vitest |
+| 24 | `MIN_PASSWORD_LENGTH` 12 → 8 | the OpenAPI agreement test red | red, naming both numbers | local, Vitest |
+| 25 | the 401-after-register message replaced with "Account created." | the "never claims the account was created" test red | red | local, Vitest |
+| 26 | the move-to-top button's condition inverted, `!atTop` → `atTop` | its browser test red | red, and only that one | local, Chromium |
+| 27 | 502 dropped from `isColdStart` | the cold-start browser test red | red; the 503 test stayed green, which is the distinction that matters | local, Chromium |
+| 28 | `/api/v1/auth/login` changed to a typo | the session test red | red. **Before Gate 3 this mutation passed 46 of 46**, because the only test touching sign-in mocked the whole module | local, Vitest |
+| 29 | `signIn` stops adopting the CSRF token | the session test red | red. Also passed 46 of 46 before Gate 3, and the result would have been a session that cannot perform a single write | local, Vitest |
+| 30 | the `mode === "create"` guard deleted, so every sign-in also registers | the AuthPanel test red | red. The mutation is a real defect: unauthenticated account creation for any typed address, and two of ten attempts a minute per press | local, Vitest |
+| 31 | the theme default inverted to dark | theme and App tests red | red, 5 of 9. Nothing covered D-27 before Gate 3 | local, Vitest |
+| 32 | **the StrictMode wake race reintroduced** (`if (waking.current) return` folded back into the error branch) | the App test red | red, and only that one. This is the BLOCK Gate 3 found; the browser suite **cannot** see it, because Playwright serves a production build where StrictMode does not double-invoke | local, Vitest |
+| 33 | the `signal` spread removed from `client.ts` | the client test red | red. The only functional change in that file, and it was deletable with 46 of 46 green | local, Vitest |
+| 34 | the `.tree-root::after` rule deleted entirely | the band test red | red, and **only** that one &mdash; which is the finding: the drop still works without it, so the band is paint, and the affordance needed its own test | local, Chromium |
+| 35 | `subtreeFullyLoaded` inverted in the delete dialog | the unopened-folder test red | red. Deleting the call instead does not typecheck, which is a second guard | local, Chromium |
 
-Rows 8, 10, 17 and 18 are the ones worth reading.
+Rows 8, 10, 17, 18, 22 and 32 are the ones worth reading.
+
+**Row 22 found a defect in the fix it was testing.** Deleting the padding was
+meant to prove only that the hit-test test could fail. It reddened two further
+tests, because the drop band is an absolutely positioned `::after` and with the
+padding gone it covered the rows beneath it and swallowed their clicks. The
+band is now `pointer-events: none`: hit testing reaches the `<ul>` through its
+own padding box either way -- a pseudo-element is never what
+`elementFromPoint` returns -- so the drop still works, and the band can no
+longer intercept anything if the padding above it is ever reduced. Verified by
+re-running the suite, not by reasoning about it.
+
+**Rows 28 to 35 are Gate 3's.** Six of them passed the whole suite before that
+review: the login path could be mistyped, the CSRF token could stop being
+captured, every sign-in could silently register an account, the theme could
+invert, the abort signal could be deleted and the visible drop band could be
+removed, all with a green run. Row 32 is the one to remember -- the defect it
+restores is invisible to the browser suite by construction, because Playwright
+serves a production build and the bug only exists under React's development
+StrictMode.
 
 **8** is a test that could not fail, found by mutation and by nothing else.
 

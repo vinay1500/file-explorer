@@ -1,25 +1,35 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "./api/client";
-import { signInAsGuest, signOut, whoAmI, type WhoAmI } from "./api/session";
+import { signOut, whoAmI, type WhoAmI } from "./api/session";
+import { isColdStart, wakeApi, WAKE_BUDGET_MS, type WakeState } from "./api/wake";
+import { AuthPanel } from "./auth/AuthPanel";
 import { Explorer } from "./tree/Explorer";
+import { MoonGlyph, SunGlyph } from "./ui/icons";
+import { applyTheme, initialTheme, storeTheme, type Theme } from "./ui/theme";
 
 /**
- * The shell, until M6.4 puts a tree inside it.
+ * The shell: a session, a theme, and every state the demo can actually be in.
  *
- * What it is already doing is the part that was missing from the plan: it
- * resolves a session before showing anything, and it shows *every* state
- * rather than only the happy one. The April 2025 client had one state. It
- * called an API that was returning 500, caught the error, wrote it to
- * `console.error`, and rendered an empty tree forever -- so a visitor saw a
- * working-looking application with no data and no explanation. That is F-01,
- * and it is a UI bug as much as an infrastructure one.
+ * The April 2025 client had one state. It called an API that was returning
+ * 500, caught the error, wrote it to `console.error`, and rendered an empty
+ * tree forever -- so a visitor saw a working-looking application with no data
+ * and no explanation. That is F-01.
+ *
+ * The version before this one had four states and still failed the first
+ * thing a visitor does, which is open a cold link. A free instance sleeps
+ * after fifteen idle minutes; the next request is answered **502 by the edge**
+ * until the container is up. The shell showed `request failed with 502
+ * (HTTP 502)` and stopped -- technically true, useless, and wrong about whose
+ * fault it was. Waiting for a cold start is what `wakeApi` is for, and this
+ * component is what shows the waiting.
  */
 
 type State =
-  | { kind: "waking" }
+  | { kind: "resolving" }
+  | { kind: "waking"; seconds: number }
   | { kind: "anonymous" }
   | { kind: "signed-in"; who: WhoAmI }
-  | { kind: "failed"; message: string; status?: number };
+  | { kind: "failed"; message: string; status?: number; canWake: boolean };
 
 function describe(error: unknown): State {
   if (error instanceof ApiError) {
@@ -27,50 +37,79 @@ function describe(error: unknown): State {
       return {
         kind: "failed",
         status: 503,
-        message: "The API is up but cannot reach its database. This is not a cold start.",
+        canWake: false,
+        message:
+          "The API is running but cannot reach its database. Waiting will not fix this one — " +
+          "it is the condition the April 2025 deployment was in for seventeen months.",
       };
     }
-    return { kind: "failed", status: error.status, message: error.message };
+    return { kind: "failed", status: error.status, canWake: isColdStart(error), message: error.message };
   }
-  // A thrown TypeError from `fetch` is the network itself failing, which on a
-  // free instance usually means the first request timed out while the server
-  // was waking. Saying so is more useful than "Failed to fetch".
   return {
     kind: "failed",
-    message:
-      "Could not reach the API. On a free instance the first request after a sleep can take " +
-      "up to a minute; try again.",
+    canWake: true,
+    message: "Could not reach the API. Nothing answered the request.",
   };
 }
 
 export function App() {
-  const [state, setState] = useState<State>({ kind: "waking" });
+  const [state, setState] = useState<State>({ kind: "resolving" });
   const [busy, setBusy] = useState(false);
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  // One wake at a time. Two overlapping polls against a waking instance is
+  // twice the requests for no extra information.
+  const waking = useRef(false);
 
-  const resolve = useCallback(async () => {
+  useEffect(() => {
+    applyTheme(theme);
+    storeTheme(theme);
+  }, [theme]);
+
+  const resolve = useCallback(async (): Promise<void> => {
     try {
       const who = await whoAmI();
       setState(who ? { kind: "signed-in", who } : { kind: "anonymous" });
     } catch (error: unknown) {
-      setState(describe(error));
+      // **A wake already in flight wins, and the second caller says nothing.**
+      //
+      // The first version of this branch reported the failure instead, and
+      // that is a defect you can see: React's StrictMode invokes effects
+      // twice in development, so the second `whoAmI()` also 502s, finds the
+      // ref set, and replaces the waiting panel with
+      // `request failed with 502 (HTTP 502)` -- the exact string this
+      // milestone exists to delete -- while the first wake keeps polling
+      // invisibly behind it. Found by Gate 3, which rendered the component
+      // inside StrictMode; the browser suite cannot see it at all, because
+      // Playwright serves a production build where StrictMode does not
+      // double-invoke.
+      //
+      // It is not only a development concern: pressing "Wake it and try
+      // again" during a wake is the same race with a user's finger instead
+      // of StrictMode.
+      if (waking.current) return;
+      if (!isColdStart(error)) {
+        setState(describe(error));
+        return;
+      }
+      waking.current = true;
+      setState({ kind: "waking", seconds: 0 });
+      try {
+        await wakeApi((s: WakeState) => {
+          setState({ kind: "waking", seconds: Math.round(s.elapsedMs / 1000) });
+        });
+        const who = await whoAmI();
+        setState(who ? { kind: "signed-in", who } : { kind: "anonymous" });
+      } catch (wakeError: unknown) {
+        setState(describe(wakeError));
+      } finally {
+        waking.current = false;
+      }
     }
   }, []);
 
   useEffect(() => {
     void resolve();
   }, [resolve]);
-
-  const guest = async () => {
-    setBusy(true);
-    try {
-      await signInAsGuest();
-      await resolve();
-    } catch (error: unknown) {
-      setState(describe(error));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const leave = async () => {
     setBusy(true);
@@ -84,58 +123,111 @@ export function App() {
     }
   };
 
+  const budgetSeconds = Math.round(WAKE_BUDGET_MS / 1000);
+
   return (
-    <main className="shell">
-      <h1>File Explorer</h1>
-
-      {state.kind === "waking" && (
-        <p className="note" role="status">
-          Waking the server. A free instance sleeps after fifteen idle minutes and can take up to
-          a minute to come back.
-        </p>
-      )}
-
-      {state.kind === "anonymous" && (
-        <>
-          <p className="note">No session. The demo needs one, and getting one takes a click.</p>
-          <button type="button" onClick={() => void guest()} disabled={busy}>
-            {busy ? "Opening a session…" : "Continue as guest"}
+    <div className="page">
+      <header className="top">
+        <div className="brand">
+          <span className="mark" aria-hidden="true" />
+          <div>
+            <h1>File Explorer</h1>
+            <p className="tag">A hierarchical folder tree, with the moves the server refuses</p>
+          </div>
+        </div>
+        <div className="top-right">
+          {state.kind === "signed-in" && (
+            <>
+              <span className="who" title={state.who.email ?? undefined}>
+                {state.who.email ?? "a guest"}
+              </span>
+              <button type="button" className="ghost" onClick={() => void leave()} disabled={busy}>
+                {busy ? "Signing out…" : "Sign out"}
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={theme === "light" ? "Switch to dark" : "Switch to light"}
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+          >
+            {theme === "light" ? <MoonGlyph /> : <SunGlyph />}
           </button>
-          <p className="muted">
-            A guest is a real account with a seeded tree, not a shared demo login. It owns its own
-            rows and can see nobody else&rsquo;s.
-          </p>
-        </>
-      )}
+        </div>
+      </header>
 
-      {state.kind === "signed-in" && (
-        <>
-          <p className="note ok" role="status">
-            Signed in as {state.who.email ?? "a guest"}.
-          </p>
-          <button type="button" onClick={() => void leave()} disabled={busy}>
-            {busy ? "Signing out…" : "Sign out"}
-          </button>
-          <Explorer />
-          <p className="muted">
-            Drag a folder onto another to move it. <strong>Drag it onto the empty space below the
-            tree to move it back to the root</strong> &mdash; that is the operation the April 2025
-            client could not express at all.
-          </p>
-        </>
-      )}
+      <main className="shell">
+        {state.kind === "resolving" && (
+          <div className="panel center" role="status">
+            <span className="spinner" aria-hidden="true" />
+            <p className="muted">Checking for a session…</p>
+          </div>
+        )}
 
-      {state.kind === "failed" && (
-        <>
-          <p className="note bad" role="alert">
-            {state.message}
-            {state.status !== undefined && <span className="muted"> (HTTP {state.status})</span>}
-          </p>
-          <button type="button" onClick={() => void resolve()} disabled={busy}>
-            Try again
-          </button>
-        </>
-      )}
-    </main>
+        {state.kind === "waking" && (
+          <div className="panel center">
+            <span className="spinner" aria-hidden="true" />
+            <h2 className="panel-h">Waking the server</h2>
+            <p className="muted">
+              This instance is free, so it sleeps after fifteen idle minutes and the first request
+              starts it again. It usually takes 30&ndash;60 seconds.
+            </p>
+            <div className="wake-bar" aria-hidden="true">
+              <i style={{ width: `${String(Math.min(100, (state.seconds / budgetSeconds) * 100))}%` }} />
+            </div>
+            {/*
+              The live region is this one line and nothing else, and it says
+              the elapsed time rounded to ten seconds.
+
+              `role="status"` on the whole panel re-announced forty words on
+              every poll -- about twenty-two times across a ninety-second
+              wait, which is not progress reporting, it is a screen reader
+              talking over itself. Rounding means roughly one announcement
+              every ten seconds, which is what a person would want to be
+              told.
+            */}
+            <p className="mono-small" role="status" aria-live="polite">
+              waking &mdash; about {Math.max(0, Math.round(state.seconds / 10) * 10)} seconds so
+              far, giving up at {budgetSeconds}
+            </p>
+            <p className="mono-small" aria-hidden="true">
+              {state.seconds}s elapsed
+            </p>
+          </div>
+        )}
+
+        {state.kind === "anonymous" && (
+          <div className="panel">
+            <AuthPanel onSession={resolve} onFailure={(e) => setState(describe(e))} />
+          </div>
+        )}
+
+        {state.kind === "signed-in" && <Explorer />}
+
+        {state.kind === "failed" && (
+          <div className="panel center">
+            <h2 className="panel-h bad">That did not work</h2>
+            <p className="note bad" role="alert">
+              {state.message}
+              {state.status !== undefined && (
+                <span className="muted"> (HTTP {state.status})</span>
+              )}
+            </p>
+            <button type="button" className="primary" onClick={() => void resolve()}>
+              {state.canWake ? "Wake it and try again" : "Try again"}
+            </button>
+          </div>
+        )}
+      </main>
+
+      <footer className="bottom">
+        <span>
+          Flask &middot; PostgreSQL &middot; React &middot; TypeScript &mdash; one origin, session
+          cookie, no CORS
+        </span>
+        <a href="https://github.com/vinay1500/file-explorer">The code</a>
+      </footer>
+    </div>
   );
 }
