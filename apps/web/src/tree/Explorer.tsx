@@ -121,7 +121,7 @@ export function Explorer() {
       return;
     }
     setAsleep(false);
-    setError(e instanceof ApiError ? e.message : "That did not reach the server.");
+    setError(e instanceof ApiError ? e.message : "That didn't reach the server.");
   }, []);
 
   const loadRoots = useCallback(async () => {
@@ -532,17 +532,17 @@ export function Explorer() {
           <li>
             <strong>Move something back to the top level</strong> by dragging it onto the dashed
             band under the tree, or by clicking <UpToRootGlyph className="ic inline" /> on its
-            row. The button does the same thing without a drag, which matters if you are using a
-            keyboard.
+            row. The button does the same thing without a drag, which matters if you&rsquo;re
+            using a keyboard.
           </li>
           <li>
             <strong>Rename or delete</strong> with the two buttons that appear when you hover a
             row. Deleting takes everything inside with it, and asks first.
           </li>
           <li>
-            <strong>Try to drop a folder inside itself.</strong> It will not let you, and the
-            server is the one that refuses: it answers 409 and says which rule you hit. That bug
-            is the reason this project exists.
+            <strong>Try to drop a folder inside itself.</strong> It won&rsquo;t let you, and
+            the server&rsquo;s the one refusing: it answers 409 and says which rule you hit.
+            That bug is why this project exists.
           </li>
         </ol>
       </div>
@@ -589,11 +589,12 @@ export function Explorer() {
           </p>
           {!countIsKnown && (
             <p className="muted">
-              I have not loaded what is inside this folder, so I cannot tell you how many
-              things there are. All of them go too, and you will see the count afterwards.
+              I haven&rsquo;t loaded what&rsquo;s inside this folder, so I can&rsquo;t tell
+              you how many things are in it. They all go too, and you&rsquo;ll see the count
+              afterwards.
             </p>
           )}
-          <p className="muted">You cannot undo this.</p>
+          <p className="muted">You can&rsquo;t undo this.</p>
           <button type="button" ref={confirmRef} className="danger" onClick={() => void commitDelete()} disabled={busy}>
             Delete
           </button>

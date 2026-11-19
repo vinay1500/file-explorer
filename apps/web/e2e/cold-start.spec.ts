@@ -53,7 +53,7 @@ test("a sleeping instance is waited for, not reported as a failure", async ({ pa
 
   // The thing that was missing: an explanation, while it is happening.
   await expect(page.getByText(/Waking the server/)).toBeVisible();
-  await expect(page.getByText(/goes to sleep when nobody has used it/)).toBeVisible();
+  await expect(page.getByText(/sleeps when nobody has used it/)).toBeVisible();
   // And never the raw status line.
   await expect(page.getByText(/HTTP 502/)).toHaveCount(0);
 
@@ -70,6 +70,6 @@ test("a database that is unreachable is reported at once, not waited out", async
   // 503 from the health route means the process is up and the database is
   // gone -- the condition the April 2025 deployment sat in for seventeen
   // months. Waiting ninety seconds for it would turn a diagnosis into a hang.
-  await expect(page.getByText(/cannot reach its database/)).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/can't reach its database/)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText(/Waking the server/)).toHaveCount(0);
 });

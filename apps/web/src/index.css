@@ -364,6 +364,27 @@ button.link {
   display: inline-block;
 }
 
+/* The first screen's steps. Same shape as the ones under the tree, because
+   they do the same job: tell somebody what to do, in order, one per line. */
+.gate-steps {
+  margin: 0 0 1.1rem;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.4rem;
+  max-width: 34rem;
+}
+
+.gate-steps li {
+  font-size: 0.88rem;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.gate-steps li::marker {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .gate-form {
   max-width: 24rem;
 }

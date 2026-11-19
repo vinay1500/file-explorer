@@ -189,7 +189,7 @@ test("deleting a folder nobody has opened does not promise it is empty", async (
 
   const dialog = page.getByRole("alertdialog");
   await expect(dialog).toContainText("everything inside it");
-  await expect(dialog).toContainText("cannot tell you how many");
+  await expect(dialog).toContainText("how many things are in it");
 });
 
 test("the move-to-top button does it without a drag at all", async ({ page }) => {

@@ -30,18 +30,18 @@ interface Props {
 
 function messageFor(error: unknown, mode: Mode): string {
   if (!(error instanceof ApiError)) {
-    return "That did not reach the server. Try it again.";
+    return "That didn't reach the server. Try it again.";
   }
   if (error.status === 401) {
     return mode === "create"
-      ? "That address is already taken, or the password does not match it."
-      : "That email and password do not match an account here.";
+      ? "That address is already taken, or the password doesn't match it."
+      : "That email and password don't match an account here.";
   }
   if (error.status === 429) {
     return "That is a lot of attempts. Wait a minute and try again.";
   }
   if (error.status === 422) {
-    return error.problem?.detail ?? "The server would not accept those details.";
+    return error.problem?.detail ?? "The server wouldn't accept those details.";
   }
   return error.message;
 }
@@ -70,10 +70,10 @@ export function AuthPanel({ onSession, onFailure }: Props) {
       // to press the button again, and let the second account be a second
       // decision rather than a side effect of ours.
       if (isColdStart(error)) {
-        setFault("The server was asleep. I am waking it up.");
+        setFault("The server was asleep. I'm waking it up.");
         try {
           await wakeApi();
-          setFault("It is awake now. Press the button again.");
+          setFault("It's awake now. Press the button again.");
         } catch (wakeError: unknown) {
           onFailure(wakeError);
         }
@@ -111,11 +111,14 @@ export function AuthPanel({ onSession, onFailure }: Props) {
   return (
     <div className="gate">
       <h2 className="gate-h">Have a look around</h2>
-      <p className="gate-lede">
-        Press the button and you get your own account with a few folders already in it. It is a
-        real account rather than a shared demo login, so nothing you do here shows up for anyone
-        else, and you can delete whatever you like.
-      </p>
+      <ol className="gate-steps">
+        <li>
+          Press <strong>Continue as guest</strong>. You&rsquo;ll get your own account with a few
+          folders in it.
+        </li>
+        <li>Drag things about. Nothing you do here shows up for anyone else.</li>
+        <li>When you&rsquo;re done, sign out or just close the tab.</li>
+      </ol>
 
       <button type="button" className="primary big" onClick={() => void guest()} disabled={busy !== null}>
         {busy === "guest" ? "Opening a session…" : "Continue as guest"}
@@ -196,8 +199,8 @@ export function AuthPanel({ onSession, onFailure }: Props) {
           </label>
 
           <p className="hint">
-            At least {MIN_PASSWORD_LENGTH} characters. I do not ask for a capital and a digit,
-            because length is the part of a password that actually makes it hard to guess.
+            At least {MIN_PASSWORD_LENGTH} characters. No capital-and-a-digit rule; length is
+            what makes a password hard to guess.
           </p>
 
           <button type="submit" className="primary" disabled={busy !== null}>
@@ -210,9 +213,9 @@ export function AuthPanel({ onSession, onFailure }: Props) {
 
           {mode === "create" && (
             <p className="hint">
-              The server replies the same way whether or not that address was already taken, so
-              nobody can use this form to find out who has an account here. If it is taken, the
-              sign-in straight afterwards will tell you.
+              You get the same answer whether or not that address is already taken, so nobody
+              can use this form to find out who&rsquo;s registered here. If it is taken, the
+              sign-in right afterwards will say so.
             </p>
           )}
         </form>

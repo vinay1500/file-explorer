@@ -39,8 +39,8 @@ function describe(error: unknown): State {
         status: 503,
         canWake: false,
         message:
-          "The server is up but it cannot reach its database. Waiting will not help with this " +
-          "one. If you are seeing it, something is genuinely broken and I would like to know.",
+          "The server's up but it can't reach its database. Waiting won't help with this one. " +
+          "If you're seeing this, something is genuinely broken and I'd like to know.",
       };
     }
     return { kind: "failed", status: error.status, canWake: isColdStart(error), message: error.message };
@@ -48,7 +48,7 @@ function describe(error: unknown): State {
   return {
     kind: "failed",
     canWake: true,
-    message: "I could not reach the server. Nothing answered at all.",
+    message: "I couldn't reach the server. Nothing answered at all.",
   };
 }
 
@@ -132,7 +132,7 @@ export function App() {
           <span className="mark" aria-hidden="true" />
           <div>
             <h1>File Explorer</h1>
-            <p className="tag">A folder tree you can drag things around in. I rebuilt it from scratch.</p>
+            <p className="tag">A folder tree you can rearrange by dragging.</p>
           </div>
         </div>
         <div className="top-right">
@@ -161,7 +161,7 @@ export function App() {
         {state.kind === "resolving" && (
           <div className="panel center" role="status">
             <span className="spinner" aria-hidden="true" />
-            <p className="muted">Checking whether you are already signed in.</p>
+            <p className="muted">Checking whether you're already signed in.</p>
           </div>
         )}
 
@@ -170,9 +170,9 @@ export function App() {
             <span className="spinner" aria-hidden="true" />
             <h2 className="panel-h">Waking the server up</h2>
             <p className="muted">
-              It runs on a free plan, so it goes to sleep when nobody has used it for fifteen
-              minutes. Starting it again takes about half a minute. Nothing is broken; it is just
-              booting.
+              It&rsquo;s on a free plan, so it sleeps when nobody has used it for fifteen
+              minutes. Waking it takes about half a minute. Nothing&rsquo;s broken, it&rsquo;s
+              just booting.
             </p>
             <div className="wake-bar" aria-hidden="true">
               <i style={{ width: `${String(Math.min(100, (state.seconds / budgetSeconds) * 100))}%` }} />
@@ -190,7 +190,7 @@ export function App() {
             */}
             <p className="mono-small" role="status" aria-live="polite">
               Still waking. About {Math.max(0, Math.round(state.seconds / 10) * 10)} seconds so
-              far. I give up at {budgetSeconds}.
+              far, and I give up at {budgetSeconds}.
             </p>
             <p className="mono-small" aria-hidden="true">
               {state.seconds}s elapsed
@@ -208,7 +208,7 @@ export function App() {
 
         {state.kind === "failed" && (
           <div className="panel center">
-            <h2 className="panel-h bad">That did not work</h2>
+            <h2 className="panel-h bad">That didn&rsquo;t work</h2>
             <p className="note bad" role="alert">
               {state.message}
               {state.status !== undefined && (
