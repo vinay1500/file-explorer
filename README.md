@@ -10,12 +10,13 @@ only structure.
 is alive. *First request after fifteen idle minutes takes 30–60 seconds: the instance is on a
 free plan and spins down.*
 
-> **Status, honestly.** The API is finished and running: schema, service layer, HTTP layer,
-> session authentication, 281 tests against real PostgreSQL. **The interface is built and not
-> yet deployed.** `apps/web` is Vite 7, React 19 and TypeScript 5 with a drag-and-drop tree,
-> 25 unit tests and 2 browser tests — but `file-explorer-frontend.vercel.app` still serves the
-> April 2025 Create React App bundle, so there is nothing to click yet beyond the API itself.
-> Connecting the deployment is the last task.
+> **Status, honestly.** Both halves are deployed and they are one origin:
+> [file-explorer-frontend.vercel.app](https://file-explorer-frontend.vercel.app) builds from
+> this repository and rewrites `/api/*` to the Render service, so the session cookie is
+> same-site and no CORS header is ever sent. `apps/web` is Vite 7, React 19 and TypeScript 5:
+> a drag-and-drop tree, a cold-start wait that explains itself instead of reporting `502`,
+> and both ways in — one-click guest, or an email and password.
+> **Open it cold and the first request takes 30–60 seconds**; the page says so while it waits.
 
 ---
 
@@ -188,7 +189,7 @@ without its indentation and produced a syntax error that read, at a glance, like
 
 ```
 apps/api     Flask API — PostgreSQL, SQLAlchemy, Alembic, flask-smorest
-apps/web     React frontend — Vite 7, React 19, TypeScript 5 (rebuilt; not yet deployed)
+apps/web     React frontend — Vite 7, React 19, TypeScript 5, deployed on Vercel
 docs/        architecture, security, ADRs, the change log
 render.yaml  the deployed API, as a file rather than as dashboard settings
 vercel.json  the rewrite that makes the session cookie same-site

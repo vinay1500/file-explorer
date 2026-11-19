@@ -68,8 +68,24 @@ every command is proven.
 | 19 | The two, reapplied precisely | 2 red | 1 red. The other exposed something else entirely — see below | `43727478366` |
 | 20 | Health exemption removed, against health's own bucket | red | red | `43727642755` |
 | 21 | `new_parent_id` narrowed from `number \| null` to `number` in the generated API types | the web build red | red: `TS2344: Type 'false' does not satisfy the constraint 'true'` | run locally against `tsc 5`, see below |
+| 22 | `padding-bottom` removed from the tree's root container | the hit-test red | red, and **two others with it**: the band is positioned absolutely, so without the padding it lay over the rows and intercepted clicks on their buttons | local, Chromium |
+| 23 | `isColdStart` widened to include 503 | the "stops at once on 503" test red | red: 2 of 9 | local, Vitest |
+| 24 | `MIN_PASSWORD_LENGTH` 12 → 8 | the OpenAPI agreement test red | red, naming both numbers | local, Vitest |
+| 25 | the 401-after-register message replaced with "Account created." | the "never claims the account was created" test red | red | local, Vitest |
+| 26 | the move-to-top button's condition inverted, `!atTop` → `atTop` | its browser test red | red, and only that one | local, Chromium |
+| 27 | 502 dropped from `isColdStart` | the cold-start browser test red | red; the 503 test stayed green, which is the distinction that matters | local, Chromium |
 
-Rows 8, 10, 17 and 18 are the ones worth reading.
+Rows 8, 10, 17, 18 and 22 are the ones worth reading.
+
+**Row 22 found a defect in the fix it was testing.** Deleting the padding was
+meant to prove only that the hit-test test could fail. It reddened two further
+tests, because the drop band is an absolutely positioned `::after` and with the
+padding gone it covered the rows beneath it and swallowed their clicks. The
+band is now `pointer-events: none`: hit testing reaches the `<ul>` through its
+own padding box either way -- a pseudo-element is never what
+`elementFromPoint` returns -- so the drop still works, and the band can no
+longer intercept anything if the padding above it is ever reduced. Verified by
+re-running the suite, not by reasoning about it.
 
 **8** is a test that could not fail, found by mutation and by nothing else.
 
