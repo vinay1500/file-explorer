@@ -49,3 +49,6 @@ CLAUDE.md
 _originals/
 _src-api/
 _src-web/
+
+# screenshots the browser tool drops here
+.playwright-mcp/
