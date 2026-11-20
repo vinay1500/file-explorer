@@ -93,3 +93,11 @@ export function MoonGlyph({ className }: Props) {
     </svg>
   );
 }
+
+export function PlusGlyph({ className }: Props) {
+  return (
+    <svg {...BOX} className={className} fill="none" stroke="currentColor" strokeWidth="1.4">
+      <path d="M8 3.4v9.2M3.4 8h9.2" strokeLinecap="round" />
+    </svg>
+  );
+}

@@ -757,6 +757,23 @@ li.tree-drop > .row {
   font-variant-numeric: tabular-nums;
 }
 
+/* The create row: a type toggle, a name, and where it is going. */
+.seg.seg-tight {
+  margin: 0;
+  flex: none;
+}
+
+.seg.seg-tight button {
+  font-size: 0.74rem;
+  padding: 0.18rem 0.5rem;
+}
+
+.new-where {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 .confirm {
   margin-top: 1rem;
   padding: 0.9rem 1rem;

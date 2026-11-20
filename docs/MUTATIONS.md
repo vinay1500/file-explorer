@@ -84,6 +84,7 @@ every command is proven.
 | 35 | `subtreeFullyLoaded` inverted in the delete dialog | the unopened-folder test red | red. Deleting the call instead does not typecheck, which is a second guard | local, Chromium |
 | 36 | **The cold-start wait restored to its old shape**: poll `/api/v1/health`, then make one unprotected call to `/api/v1/auth/me` | the new session-retry test red | red, and only that one. This is the defect Vinay hit on 19 November, reproduced on demand | local, Vitest |
 | 37 | **The 15-second per-attempt ceiling restored**, both as the constant and hard-coded at the call site | the ceiling test red | red both ways on the second attempt. **The first version of that test was vacuous**: it asserted a getter that returned the constant, so hard-coding a different value at the call site went straight past it. The test now reads the ceiling the loop reports | local, Vitest |
+| 38 | `createNode(name, adding.type, adding.parent)` reverted to `createNode(name, "folder", null)` | the three creation tests red | red: 3 of 4, and the folder-at-top-level test stayed green, which is what makes the other three mean something | local, Chromium |
 
 Rows 8, 10, 17, 18, 22, 32, 36 and 37 are the ones worth reading.
 
