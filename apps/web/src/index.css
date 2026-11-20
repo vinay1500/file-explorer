@@ -617,6 +617,70 @@ button.link {
   background: var(--surface-2);
 }
 
+/*
+  Where you are. Low-contrast until it matters, like a file manager's address
+  bar -- it should be findable without competing with the tree itself.
+*/
+.crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.1rem;
+  min-height: 30px;
+  margin-bottom: 0.5rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 0.8rem;
+}
+
+.crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.crumb {
+  font: inherit;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-2);
+  padding: 0.15rem 0.3rem;
+  border-radius: 5px;
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumb:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.crumb[aria-current="location"] {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.crumb-sep,
+.crumb-gap {
+  color: var(--muted);
+  user-select: none;
+}
+
+/* The row the breadcrumb is pointing at. */
+.row.is-here {
+  background: var(--accent-soft);
+}
+
+.row.is-here .name {
+  font-weight: 600;
+}
+
 li.tree-drop > .row {
   background: var(--accent-soft);
   outline: 1.5px solid var(--accent);
@@ -804,6 +868,20 @@ li.tree-drop > .row {
   border-radius: 5px;
   padding: 0.2rem 0.35rem;
   max-width: 14rem;
+}
+
+/*
+  The settled destination, when the row's + already answered the question.
+  Weighted like a statement rather than a control: no border, no affordance,
+  nothing that invites a second answer. F-76.
+*/
+.new-where.fixed strong {
+  font-weight: 600;
+  color: var(--ink);
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .new-where select:focus-visible {

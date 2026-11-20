@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import type { NodeModel } from "@minoru/react-dnd-treeview";
 import type { Node } from "../api/contract";
-import { ROOT_ID, mergeNodes, subtreeIds, toParentId, toTreeNode, type NodeData } from "./model";
+import {
+  ROOT_ID,
+  crumbsFor,
+  mergeNodes,
+  subtreeIds,
+  toParentId,
+  toTreeNode,
+  type NodeData,
+} from "./model";
 
 /**
  * These four functions are where F-06 lived.
@@ -103,5 +111,55 @@ describe("subtreeIds", () => {
 
   it("returns just the node when nothing is loaded beneath it", () => {
     expect(subtreeIds([tn(1, 0)], 1)).toEqual(new Set([1]));
+  });
+});
+
+describe("crumbsFor", () => {
+  const tn = (id: number, parent: number, text: string): NodeModel<NodeData> => ({
+    id,
+    parent,
+    text,
+    droppable: true,
+    data: { type: "folder" },
+  });
+
+  it("reads from the top level down, not from the node up", () => {
+    const nodes = [tn(1, 0, "Documents"), tn(2, 1, "Invoices"), tn(3, 2, "march.pdf")];
+    const { crumbs, complete } = crumbsFor(nodes, 3);
+    expect(crumbs.map((c) => c.text)).toEqual(["Documents", "Invoices", "march.pdf"]);
+    expect(complete).toBe(true);
+  });
+
+  it("is a single crumb for something at the top level", () => {
+    const { crumbs, complete } = crumbsFor([tn(1, 0, "Documents")], 1);
+    expect(crumbs.map((c) => c.text)).toEqual(["Documents"]);
+    expect(complete).toBe(true);
+  });
+
+  it("does not pick up a sibling branch on the way up", () => {
+    const nodes = [tn(1, 0, "Documents"), tn(9, 0, "Photos"), tn(2, 1, "Invoices")];
+    expect(crumbsFor(nodes, 2).crumbs.map((c) => c.text)).toEqual(["Documents", "Invoices"]);
+  });
+
+  it("reports a path that does not reach the top as incomplete", () => {
+    // The parent is missing, so the chain starts in the middle. Returning
+    // ["Invoices", "march.pdf"] with no flag would read as a top-level
+    // Invoices folder, which is a different and wrong statement.
+    const nodes = [tn(2, 1, "Invoices"), tn(3, 2, "march.pdf")];
+    const { crumbs, complete } = crumbsFor(nodes, 3);
+    expect(crumbs.map((c) => c.text)).toEqual(["Invoices", "march.pdf"]);
+    expect(complete).toBe(false);
+  });
+
+  it("reports an unknown id as incomplete rather than empty-and-fine", () => {
+    expect(crumbsFor([tn(1, 0, "Documents")], 404)).toEqual({ crumbs: [], complete: false });
+  });
+
+  it("terminates on a parent cycle instead of hanging the page", () => {
+    // The schema cannot produce this and the move algorithm refuses it. The
+    // bound exists so that a bug somewhere else cannot lock the browser.
+    const nodes = [tn(1, 2, "a"), tn(2, 1, "b")];
+    const { complete } = crumbsFor(nodes, 1);
+    expect(complete).toBe(false);
   });
 });
