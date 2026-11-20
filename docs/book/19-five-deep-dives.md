@@ -130,6 +130,35 @@ what it skips that a real caller cannot.
 `document.elementFromPoint` what is under each coordinate and fails if the answer is not the
 container.
 
+### And then it happened again, which is the part worth telling
+
+Two days later every new folder and file was landing at the top level. The cause was not the
+create code: it took a parent, sent a parent, and the API accepted it. The button that supplied
+a parent lived in a row's action group, and that group was `opacity: 0` until the pointer was
+over that exact row. So the only control anybody could find was the one in the header, which
+creates at the top level.
+
+**The browser test for it was green**, for the same reason the drag test was green through the
+bug above: Playwright clicks a control by its accessible name, and `opacity: 0` does not stop
+it. Two different controls, two different mechanisms — no pixels, then no contrast — and one
+test suite that could not see either, because in both cases the suite reached past the part a
+person has to get past.
+
+So the test that closes it does not click anything. It reads the computed opacity of the action
+group with nothing hovered and fails if a person could not see it:
+
+```ts
+const opacity = await page
+  .getByRole("button", { name: "New item inside projects" })
+  .evaluate((el) => Number(getComputedStyle(el.closest(".actions")!).opacity));
+expect(opacity).toBeGreaterThan(0.2);
+```
+
+> The generalisation, and it is worth saying in an interview: **for any interactive element,
+> there are two questions, and a test answers only one of them.** Does it do the right thing
+> when used? And can it be used? The second one needs an assertion about what is rendered — a
+> size, a position, a contrast, an opacity — not about what is in the DOM.
+
 ---
 
 ## Dive 5 · Why the frontend could not sign in, and why CORS was the wrong fix
@@ -173,7 +202,8 @@ it points at the service this repository declares.
 3. Have somebody ask the "where it goes next" question and answer that too — that is the part
    that separates a rehearsed story from an understood one.
 
-Four of the five are things that were wrong in code that shipped. The fifth — dive 2 — is the
+Four of the five are things that were wrong in code that shipped, and dive 4 has now happened
+twice. The fifth — dive 2 — is the
 one where the first fix was incomplete, and it is the most valuable of them for exactly that
 reason.
 

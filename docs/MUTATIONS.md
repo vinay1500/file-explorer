@@ -85,8 +85,10 @@ every command is proven.
 | 36 | **The cold-start wait restored to its old shape**: poll `/api/v1/health`, then make one unprotected call to `/api/v1/auth/me` | the new session-retry test red | red, and only that one. This is the defect Vinay hit on 19 November, reproduced on demand | local, Vitest |
 | 37 | **The 15-second per-attempt ceiling restored**, both as the constant and hard-coded at the call site | the ceiling test red | red both ways on the second attempt. **The first version of that test was vacuous**: it asserted a getter that returned the constant, so hard-coding a different value at the call site went straight past it. The test now reads the ceiling the loop reports | local, Vitest |
 | 38 | `createNode(name, adding.type, adding.parent)` reverted to `createNode(name, "folder", null)` | the three creation tests red | red: 3 of 4, and the folder-at-top-level test stayed green, which is what makes the other three mean something | local, Chromium |
+| 39 | **`.actions` returned to `opacity: 0`** | the visibility test red | red, 1 failed and **6 passed** — **every test that clicks those controls stayed green**, which is the whole finding. Playwright clicks by accessible name and opacity does not stop it, so six green tests covered a control no person could see | local, Chromium |
+| 40 | The destination `<select>` hard-wired to `null`, ignoring what was chosen | the two picker tests red | red both, 2 failed and 5 passed. The five older tests stayed green because none of them changes the destination — which is precisely the state the suite was in while F-73 was live | local, Chromium |
 
-Rows 8, 10, 17, 18, 22, 32, 36 and 37 are the ones worth reading.
+Rows 8, 10, 17, 18, 22, 32, 36, 37 and 39 are the ones worth reading.
 
 **Row 22 found a defect in the fix it was testing.** Deleting the padding was
 meant to prove only that the hit-test test could fail. It reddened two further
@@ -106,6 +108,17 @@ removed, all with a green run. Row 32 is the one to remember -- the defect it
 restores is invisible to the browser suite by construction, because Playwright
 serves a production build and the bug only exists under React's development
 StrictMode.
+
+**Row 39 is row 22's lesson arriving a second time, and it is the most useful
+row in this table.** The mutation reddens exactly one test -- the one that asks
+what a person can *see* -- while the six tests that *use* the same control
+stay green. Those six were green all the way through F-73, when every new
+folder and file was landing at the top level because the control that sets a
+parent was transparent. A browser test reaches an element by name; a person has
+to find it first. Two defects now (F-62, F-73) have lived entirely inside that
+gap, so the rule is written down rather than remembered: **an interactive
+element needs an assertion about what is rendered -- a size, a position, an
+opacity -- and not only one about what happens when it is clicked.**
 
 **8** is a test that could not fail, found by mutation and by nothing else.
 

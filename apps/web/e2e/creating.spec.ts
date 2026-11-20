@@ -88,7 +88,7 @@ test("the button on a folder puts the new item inside that folder", async ({ pag
   await page.getByRole("button", { name: "New item inside projects" }).click();
   // The form says where it is going, because it is rendered above the tree
   // rather than as a row inside the folder.
-  await expect(page.getByText("in projects")).toBeVisible();
+  await expect(page.getByLabel("Where the new file goes")).toHaveValue("1");
   await page.getByLabel("Name for the new file").fill("README.md");
   await page.getByRole("button", { name: "Create" }).click();
 
@@ -113,4 +113,80 @@ test("the type can be switched after the form is open", async ({ page }) => {
 
   await expect.poll(() => created.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
   expect(created.bodies[0]).toEqual({ name: "sub", type: "folder", parent_id: 1 });
+});
+
+/**
+ * F-73, and it is F-62 wearing different clothes.
+ *
+ * Every test above passed while the defect was live, and the reason is the
+ * same one that let a browser test stay green through F-62: **Playwright
+ * clicks a control by name, and `opacity: 0` does not stop it.** The button
+ * that creates something inside a folder was there, took the right parent and
+ * sent the right body -- and a person could not see it, because the row
+ * actions were transparent until the pointer was over that exact row. So the
+ * only control anybody could find was the header button, which creates at the
+ * top level, and Vinay reported the obvious consequence: *"new folder and
+ * files are always made on root not inside a folder."*
+ *
+ * The two tests below are the ones that would have caught it. One asks what a
+ * person can see rather than what the DOM contains; the other gives the
+ * header form a way to say where the thing goes, and proves the body changes.
+ */
+test("the controls on a row are visible without hovering over it", async ({ page }) => {
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  // Deliberately no hover, no focus, no click anywhere near the row. This is
+  // the state a person is in when they open the page and look at it.
+  const opacity = await page
+    .getByRole("button", { name: "New item inside projects" })
+    .evaluate((el) => {
+      const actions = el.closest(".actions");
+      return actions === null ? 0 : Number(getComputedStyle(actions).opacity);
+    });
+
+  // 0.55 today. The assertion is "a person can see that this is there", not
+  // the exact value -- but zero is the defect and zero must fail.
+  expect(opacity).toBeGreaterThan(0.2);
+});
+
+test("the header form can send the new item into a folder", async ({ page }) => {
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  // Starting from the header button -- the route every person actually took.
+  await page.getByRole("button", { name: "New folder" }).click();
+  await expect(page.getByLabel("Where the new folder goes")).toHaveValue("");
+  await page.getByLabel("Where the new folder goes").selectOption({ label: "projects" });
+  await page.getByLabel("Name for the new folder").fill("2027");
+  await page.getByRole("button", { name: "Create" }).click();
+
+  await expect.poll(() => created.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
+  // The body is the assertion. A redraw assertion would pass against a client
+  // that sends parent_id null and then re-reads a tree that disagrees.
+  expect(created.bodies[0]).toEqual({ name: "2027", type: "folder", parent_id: 1 });
+});
+
+test("a nested folder is offered by its path, not by its bare name", async ({ page }) => {
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+
+  // Open `projects` so its child is loaded and can be offered as a target.
+  await page.getByRole("button", { name: "Expand projects" }).click();
+  await expect(page.getByText("2026")).toBeVisible();
+
+  await page.getByRole("button", { name: "New file" }).click();
+  // Two folders named "2026" under different parents are the ordinary case in
+  // a tree, and a picker that lists bare names cannot tell them apart.
+  await page.getByLabel("Where the new file goes").selectOption({ label: "projects / 2026" });
+  await page.getByLabel("Name for the new file").fill("plan.md");
+  await page.getByRole("button", { name: "Create" }).click();
+
+  await expect.poll(() => created.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
+  expect(created.bodies[0]).toEqual({ name: "plan.md", type: "file", parent_id: 2 });
 });
