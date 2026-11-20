@@ -138,4 +138,4 @@ matters.
 
 ---
 
-[← Chapter 19 · Five deep dives](README.md) · [Back to the book](README.md)
+[← Chapter 19 · Six deep dives](README.md) · [Back to the book](README.md)

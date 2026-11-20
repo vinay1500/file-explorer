@@ -165,9 +165,9 @@ because the trigger introduces a second structure that can disagree with the fir
 | Q25–Q30 | Sessions, CSRF, isolation, rate limits | [Chapter 12](12-identity-and-isolation.md) |
 | Q31–Q33 | Mutation testing, coverage, what tests cannot prove | [Chapter 14](14-testing-what-matters.md) |
 
-And the five that are worth ten minutes rather than thirty seconds are
+And the six that are worth ten minutes rather than thirty seconds are
 [Chapter 19](19-five-deep-dives.md).
 
 ---
 
-**Next:** [Chapter 19 · Five deep dives](19-five-deep-dives.md)
+**Next:** [Chapter 19 · Six deep dives](19-five-deep-dives.md)

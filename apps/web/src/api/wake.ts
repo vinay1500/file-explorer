@@ -57,6 +57,70 @@ import { ApiError, request } from "./client";
  */
 const ATTEMPT_TIMEOUT_MS = 75_000;
 
+/**
+ * The API's own origin, and the only absolute URL in this application.
+ *
+ * **This module has now been wrong three times, and the third one was not in
+ * this loop at all.** The loop was correct. It was sending its requests down a
+ * path that cannot wake the service.
+ *
+ * Measured 20 November, with the instance left alone for sixteen minutes and
+ * nothing else touched:
+ *
+ * | request | result |
+ * | --- | --- |
+ * | direct to this origin | held open, then `200` in **32.5s** |
+ * | through the Vercel rewrite | **`502` twelve times in 87 seconds**, every one `x-render-routing: no-deploy`, and the instance still asleep afterwards |
+ *
+ * So a browser, which only ever speaks to the rewrite, could retry for any
+ * budget at any ceiling and never wake anything. M8 raised a retry, M12 fixed
+ * what it waited on, M13 fixed the arithmetic -- three fixes to a mechanism
+ * that was already doing its job.
+ *
+ * `vercel.json` holds the same hostname as its rewrite destination, and
+ * `test_deploy_config.py` fails if the two ever disagree, because a wake ping
+ * aimed at a host this project no longer deploys to would fail silently and
+ * look exactly like the bug above.
+ */
+export const WAKE_ORIGIN = "https://file-explorer-api-xgxr.onrender.com";
+
+/**
+ * Knock on the API's own door, so that it starts.
+ *
+ * Cross-origin and deliberately `no-cors`: there is nothing to read. The point
+ * is only that the request *arrives*, because an arriving request is what makes
+ * Render boot the container. An opaque response carries no status and no body,
+ * so this cannot report success and does not try to -- the caller goes on
+ * retrying the same-origin request whose answer it actually needs, and that
+ * request starts succeeding once the container is up.
+ *
+ * **Nothing about D-22 changes.** Every request that carries or needs the
+ * session still goes through `client.ts`, still relative, still same-origin,
+ * still `SameSite=Lax`. This one sends no cookie (`credentials: "omit"`),
+ * receives nothing, and exists purely as a knock. It is also why `client.ts`
+ * keeps its throw on absolute URLs untouched: this is the single deliberate
+ * exception and it lives outside the client on purpose.
+ */
+export async function nudgeOrigin(signal?: AbortSignal): Promise<void> {
+  // `exactOptionalPropertyTypes` is on, and `RequestInit.signal` is
+  // `AbortSignal | null` rather than optional -- so the absent case has to be
+  // `null`, not an omitted key holding `undefined`.
+  const init: RequestInit = {
+    mode: "no-cors",
+    credentials: "omit",
+    cache: "no-store",
+    signal: signal ?? null,
+  };
+  try {
+    await fetch(`${WAKE_ORIGIN}/api/v1/health`, init);
+  } catch {
+    // An opaque request that fails tells us nothing a retry of the real
+    // request will not tell us better. Swallowing it here is not hiding an
+    // error; there is no error to hide, because there was never a response
+    // to read.
+  }
+}
+
 
 /**
  * Total time to keep trying.
@@ -145,6 +209,11 @@ export interface KeepTryingOptions {
   signal?: AbortSignal;
   now?: () => number;
   /**
+   * Override the wake knock. Only tests pass this, so that "did it knock, and
+   * how many times" can be asserted without a network.
+   */
+  nudge?: (signal?: AbortSignal) => Promise<void>;
+  /**
    * Override the per-attempt ceiling. Only tests pass this: it is what lets
    * the relationship between the ceiling and a slow operation be exercised at
    * millisecond scale, with real timers, rather than asserted about constants.
@@ -176,6 +245,19 @@ export async function keepTrying<T>(
   let last: unknown = null;
 
   const ceilingMs = options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS;
+  const nudge = options.nudge ?? nudgeOrigin;
+
+  // At most one knock in flight. Render holds the first one open for the whole
+  // cold start, so stacking them would add load and tell us nothing new -- and
+  // the loop below is retrying every one to four seconds, which would be
+  // twenty-odd simultaneous requests at a service that is trying to boot.
+  let knocking: Promise<void> | null = null;
+  const knockOnce = (): void => {
+    if (knocking !== null) return;
+    knocking = nudge(options.signal).finally(() => {
+      knocking = null;
+    });
+  };
 
   for (;;) {
     attempts += 1;
@@ -186,6 +268,9 @@ export async function keepTrying<T>(
       last = error;
       if (options.signal?.aborted === true) throw error;
       if (!isColdStart(error)) throw error;
+      // Only once a cold start is *confirmed*. A warm service answers the
+      // first attempt and is never knocked on at all.
+      knockOnce();
       if (now() - started >= budgetMs) throw new StillWaking(now() - started, error);
     }
     await wait(delay, options.signal);
