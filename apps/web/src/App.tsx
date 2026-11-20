@@ -74,6 +74,18 @@ function describe(error: unknown): State {
   };
 }
 
+/**
+ * How long the very first attempt may stay silent.
+ *
+ * The waiting panel used to appear from the second attempt, which was fine
+ * when an attempt lasted fifteen seconds. With a seventy-five second ceiling
+ * (F-70) it meant a cold visitor could watch "Checking whether you're already
+ * signed in" for over a minute with nothing saying why. A warm instance
+ * answers in about a third of a second, so three seconds of silence costs a
+ * warm visitor nothing and saves a cold one from a blank minute.
+ */
+const FIRST_PANEL_DELAY_MS = 3_000;
+
 export function App() {
   const [state, setState] = useState<State>({ kind: "resolving" });
   const [busy, setBusy] = useState(false);
@@ -128,6 +140,11 @@ export function App() {
     // honest rather than expensive, and a 401 from it is a success.
     if (waking.current) return;
     waking.current = true;
+    const startedAt = Date.now();
+    const sayItIsWaking = setTimeout(() => {
+      wakeStartedAt.current ??= startedAt;
+      setState({ kind: "waking", seconds: Math.round((Date.now() - startedAt) / 1000) });
+    }, FIRST_PANEL_DELAY_MS);
     try {
       const who = await keepTrying(
         (signal) => whoAmI(signal),
@@ -146,6 +163,7 @@ export function App() {
     } catch (error: unknown) {
       setState(describe(error));
     } finally {
+      clearTimeout(sayItIsWaking);
       waking.current = false;
       wakeStartedAt.current = null;
     }

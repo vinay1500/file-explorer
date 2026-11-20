@@ -104,6 +104,32 @@ describe("a cold start under StrictMode", () => {
     expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument();
   }, 30_000);
 
+  it("stops saying \"checking\" within a few seconds, even on the first attempt", async () => {
+    // The waiting panel used to appear only from the second attempt. With a
+    // 75-second ceiling that left a cold visitor watching "Checking whether
+    // you're already signed in" for over a minute with nothing explaining it.
+    // A warm instance answers in about a third of a second, so this threshold
+    // costs a warm visitor nothing.
+    // Never settles: the first attempt is simply slow, which is exactly what a
+    // cold start looks like from the browser's side.
+    fetchMock.mockReturnValue(new Promise<Response>(() => undefined));
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    expect(screen.getByText(/Checking whether/)).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Waking the server/)).toBeInTheDocument();
+      },
+      { timeout: 6_000 },
+    );
+  }, 10_000);
+
   it("reports a 503 immediately instead of waiting it out", async () => {
     fetchMock.mockResolvedValue(reply(503, { title: "degraded" }, false));
 

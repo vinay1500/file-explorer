@@ -12,6 +12,7 @@ import {
   FolderClosed,
   FolderOpen,
   PencilGlyph,
+  PlusGlyph,
   UpToRootGlyph,
 } from "../ui/icons";
 import { kindOf } from "../ui/fileKind";
@@ -104,7 +105,11 @@ export function Explorer() {
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState<Tn | null>(null);
   const [draft, setDraft] = useState("");
-  const [adding, setAdding] = useState(false);
+  // What is being created, and where. `null` means nothing is being created;
+  // a `parent` of `null` inside it means the top level.
+  const [adding, setAdding] = useState<{ type: "folder" | "file"; parent: number | null } | null>(
+    null,
+  );
   const [newName, setNewName] = useState("");
   const [confirming, setConfirming] = useState<Tn | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -305,32 +310,45 @@ export function Explorer() {
   };
 
   /**
-   * Create a folder at the top level.
+   * Create a folder **or a file**, at the top level or inside a folder.
    *
-   * It was a `window.prompt` until M8. That is one line of code and three
-   * problems: Chrome suppresses it outright after a few uses on a page,
-   * Firefox lets the user tick "prevent further dialogs" and then nothing
-   * happens at all, and neither can be styled, focused or cancelled with a
-   * keyboard in the way the rest of this component can.
+   * It was a `window.prompt` until M8, and until M14 it could only ever make a
+   * folder, at the top level, whatever the API could do. `POST /api/v1/nodes`
+   * has taken `type` and `parent_id` since M3a and the interface offered
+   * neither, so the seeded tree contained files that a visitor had no way to
+   * produce. Vinay found that by using it: "there is no way to make a new
+   * file only a new folder."
+   *
+   * The parent half comes with it rather than after it. A file that can only
+   * be made at the top level and then dragged into place is a worse answer
+   * than no button, and the drag is the thing this project is about anyway.
    */
   const commitCreate = async () => {
+    if (adding === null) return;
     const name = newName.trim();
     if (name === "") {
-      setAdding(false);
+      setAdding(null);
       return;
     }
     setBusy(true);
     try {
-      await createNode(name, "folder", null);
+      await createNode(name, adding.type, adding.parent);
       setError(null);
-      setAdding(false);
+      setAdding(null);
       setNewName("");
-      await loadRoots();
+      // Reloading the parent rather than the whole tree, so a file created
+      // inside a collapsed folder does not silently vanish from the count.
+      await reload([adding.parent]);
     } catch (e: unknown) {
       report(e);
     } finally {
       setBusy(false);
     }
+  };
+
+  const startCreating = (type: "folder" | "file", parent: number | null) => {
+    setAdding({ type, parent });
+    setNewName("");
   };
 
   const descendantCount = confirming ? subtreeIds(nodes, confirming.id).size - 1 : 0;
@@ -349,12 +367,21 @@ export function Explorer() {
             type="button"
             className="primary small"
             onClick={() => {
-              setAdding(true);
-              setNewName("");
+              startCreating("folder", null);
             }}
-            disabled={busy || adding}
+            disabled={busy || adding !== null}
           >
             New folder
+          </button>
+          <button
+            type="button"
+            className="small"
+            onClick={() => {
+              startCreating("file", null);
+            }}
+            disabled={busy || adding !== null}
+          >
+            New file
           </button>
         </div>
       </div>
@@ -375,29 +402,73 @@ export function Explorer() {
         </p>
       )}
 
-      {adding && (
+      {/*
+        One form, above the tree, whatever it is making and wherever it is
+        going. Rendering it as a row inside the folder would read better, and
+        the library owns that list -- so instead the form says where the thing
+        will land, which is the part a person needs to know.
+      */}
+      {adding !== null && (
         <form
           className="new-row"
+          aria-label={`New ${adding.type}`}
           onSubmit={(e) => {
             e.preventDefault();
             void commitCreate();
           }}
         >
-          <FolderClosed className="ic ic-folder" />
+          <span className="seg seg-tight" role="group" aria-label="Folder or file">
+            <button
+              type="button"
+              className={adding.type === "folder" ? "seg-on" : ""}
+              aria-pressed={adding.type === "folder"}
+              onClick={() => {
+                setAdding({ ...adding, type: "folder" });
+              }}
+            >
+              Folder
+            </button>
+            <button
+              type="button"
+              className={adding.type === "file" ? "seg-on" : ""}
+              aria-pressed={adding.type === "file"}
+              onClick={() => {
+                setAdding({ ...adding, type: "file" });
+              }}
+            >
+              File
+            </button>
+          </span>
+          {adding.type === "folder" ? (
+            <FolderClosed className="ic ic-folder" />
+          ) : (
+            <FileGlyph className="ic ic-file k-other" />
+          )}
           <input
             autoFocus
             className="rename"
-            aria-label="Name for the new folder"
+            aria-label={`Name for the new ${adding.type}`}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Escape") setAdding(false);
+              if (e.key === "Escape") setAdding(null);
             }}
           />
+          <span className="new-where">
+            {adding.parent === null
+              ? "at the top level"
+              : `in ${nodes.find((n) => n.id === adding.parent)?.text ?? "that folder"}`}
+          </span>
           <button type="submit" className="primary small" disabled={busy}>
             Create
           </button>
-          <button type="button" className="ghost small" onClick={() => setAdding(false)}>
+          <button
+            type="button"
+            className="ghost small"
+            onClick={() => {
+              setAdding(null);
+            }}
+          >
             Cancel
           </button>
         </form>
@@ -468,6 +539,20 @@ export function Explorer() {
                 )}
 
                 <span className="actions">
+                  {isFolder && (
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      onClick={() => {
+                        if (!isOpen) onToggle();
+                        startCreating("file", typeof node.id === "number" ? node.id : Number(node.id));
+                      }}
+                      aria-label={`New item inside ${node.text}`}
+                      title="New item inside this folder"
+                    >
+                      <PlusGlyph />
+                    </button>
+                  )}
                   {!atTop && (
                     <button
                       type="button"
@@ -515,7 +600,7 @@ export function Explorer() {
 
       {rootCount === 0 && !busy && (
         <p className="empty">
-          Nothing in here yet. Use <strong>New folder</strong> to make one.
+          Nothing in here yet. <strong>New folder</strong> or <strong>New file</strong> makes the first one.
         </p>
       )}
 
@@ -525,6 +610,12 @@ export function Explorer() {
           <li>
             <strong>Open a folder</strong> by clicking the arrow beside it. Its contents load the
             first time you open it.
+          </li>
+          <li>
+            <strong>Make something</strong> with <strong>New folder</strong> or
+            <strong> New file</strong> at the top, or with the
+            <PlusGlyph className="ic inline" /> on any folder to put it straight inside that one.
+            A file here is a name and a place in the tree; no contents are stored.
           </li>
           <li>
             <strong>Move something into a folder</strong> by dragging it onto that folder.
