@@ -358,6 +358,41 @@ export function Explorer() {
   const countIsKnown = confirming !== null && subtreeFullyLoaded(nodes, loaded, confirming.id);
   const rootCount = nodes.filter((n) => n.parent === ROOT_ID).length;
 
+  /**
+   * Every folder that has been loaded, as a flat list with its path, for the
+   * destination picker.
+   *
+   * F-73 is why this exists. Creating inside a folder was already possible --
+   * the per-row button passed the folder's id and `createNode` sent it -- and
+   * it was unreachable, because the only control a person could find was the
+   * header button, and that one passes `null`. Vinay: "new folder and files
+   * are always made on root not inside a folder." The same shape as F-62: the
+   * feature was there and the way to it was not.
+   *
+   * A picker rather than only unhiding the row button, because the row button
+   * answers "put something in *this* folder" and the person who has already
+   * clicked **New folder** is asking "where does this go", which is a
+   * different question and needs an answer at the point of asking.
+   */
+  const folderChoices = (() => {
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const pathOf = (n: Tn): string => {
+      const parts: string[] = [];
+      let cur: Tn | undefined = n;
+      // The depth cap is 64, so this cannot run away; the guard is against a
+      // partially loaded tree, not against the tree.
+      for (let hops = 0; cur !== undefined && hops <= 64; hops += 1) {
+        parts.unshift(cur.text);
+        cur = cur.parent === ROOT_ID ? undefined : byId.get(cur.parent);
+      }
+      return parts.join(" / ");
+    };
+    return nodes
+      .filter((n) => n.droppable === true)
+      .map((n) => ({ id: n.id, label: pathOf(n) }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  })();
+
   return (
     <section className="explorer panel" aria-busy={busy}>
       <div className="ex-head">
@@ -454,11 +489,23 @@ export function Explorer() {
               if (e.key === "Escape") setAdding(null);
             }}
           />
-          <span className="new-where">
-            {adding.parent === null
-              ? "at the top level"
-              : `in ${nodes.find((n) => n.id === adding.parent)?.text ?? "that folder"}`}
-          </span>
+          <label className="new-where">
+            <span>in</span>
+            <select
+              aria-label={`Where the new ${adding.type} goes`}
+              value={adding.parent === null ? "" : String(adding.parent)}
+              onChange={(e) => {
+                setAdding({ ...adding, parent: e.target.value === "" ? null : Number(e.target.value) });
+              }}
+            >
+              <option value="">the top level</option>
+              {folderChoices.map((f) => (
+                <option key={String(f.id)} value={String(f.id)}>
+                  {f.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <button type="submit" className="primary small" disabled={busy}>
             Create
           </button>

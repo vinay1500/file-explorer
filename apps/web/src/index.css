@@ -701,10 +701,23 @@ li.tree-drop > .row {
   color: var(--ink);
 }
 
+/*
+ * These were `opacity: 0` until the pointer was over the row, and that is how
+ * F-73 happened: the button that creates something *inside* a folder existed,
+ * passed the right parent and sent the right body, and nobody could find it,
+ * so everything landed at the top level. A control that cannot be seen is a
+ * control that is not there -- the same sentence as F-62, about a different
+ * control, two days later.
+ *
+ * 0.55 rather than 1 so forty rows are not forty rows of buttons shouting;
+ * full strength under the pointer and under keyboard focus. The browser suite
+ * asserts this number is above zero without hovering anything, because every
+ * test that *clicks* these buttons was green throughout the defect.
+ */
 .actions {
   display: flex;
   gap: 0.15rem;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 120ms;
 }
 
@@ -768,10 +781,34 @@ li.tree-drop > .row {
   padding: 0.18rem 0.5rem;
 }
 
+/*
+  Was a caption saying where the thing would land. It is a control now, because
+  reading "at the top level" and being unable to change it is the defect, not
+  the cure (F-73).
+*/
 .new-where {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   font-size: 0.78rem;
   color: var(--muted);
   white-space: nowrap;
+}
+
+.new-where select {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.2rem 0.35rem;
+  max-width: 14rem;
+}
+
+.new-where select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .confirm {
