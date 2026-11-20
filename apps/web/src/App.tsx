@@ -81,11 +81,37 @@ export function App() {
   // One wake at a time. Two overlapping polls against a waking instance is
   // twice the requests for no extra information.
   const waking = useRef(false);
+  // When the wait began, so the counter can tick on its own clock.
+  const wakeStartedAt = useRef<number | null>(null);
 
   useEffect(() => {
     applyTheme(theme);
     storeTheme(theme);
   }, [theme]);
+
+  // **The counter ticks on a clock, not on attempt boundaries.**
+  //
+  // It used to be updated only when an attempt started, which was fine when an
+  // attempt lasted fifteen seconds and wrong as soon as one could last
+  // seventy-five: the number would sit still for over a minute while the page
+  // claimed to be working. A progress indicator that stops moving is worse
+  // than none, because the next thing somebody does is reload, and a reload
+  // throws away the wait.
+  useEffect(() => {
+    if (state.kind !== "waking") return;
+    const id = setInterval(() => {
+      const started = wakeStartedAt.current;
+      if (started === null) return;
+      setState((current) =>
+        current.kind === "waking"
+          ? { kind: "waking", seconds: Math.round((Date.now() - started) / 1000) }
+          : current,
+      );
+    }, 1000);
+    return () => {
+      clearInterval(id);
+    };
+  }, [state.kind]);
 
   const resolve = useCallback(async (): Promise<void> => {
     // **One operation, retried, with one deadline over the whole thing.**
@@ -108,8 +134,10 @@ export function App() {
         (s: WakeState) => {
           // The first attempt gets no waiting panel: on a warm instance it
           // answers in a third of a second and a flash of "waking the server"
-          // would be a lie about what is happening.
+          // would be a lie about what is happening. From the second on, the
+          // panel appears and the interval above keeps its number moving.
           if (s.attempt > 1) {
+            wakeStartedAt.current ??= Date.now() - s.elapsedMs;
             setState({ kind: "waking", seconds: Math.round(s.elapsedMs / 1000) });
           }
         },
@@ -119,6 +147,7 @@ export function App() {
       setState(describe(error));
     } finally {
       waking.current = false;
+      wakeStartedAt.current = null;
     }
   }, []);
 

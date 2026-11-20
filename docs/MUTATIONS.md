@@ -83,8 +83,9 @@ every command is proven.
 | 34 | the `.tree-root::after` rule deleted entirely | the band test red | red, and **only** that one &mdash; which is the finding: the drop still works without it, so the band is paint, and the affordance needed its own test | local, Chromium |
 | 35 | `subtreeFullyLoaded` inverted in the delete dialog | the unopened-folder test red | red. Deleting the call instead does not typecheck, which is a second guard | local, Chromium |
 | 36 | **The cold-start wait restored to its old shape**: poll `/api/v1/health`, then make one unprotected call to `/api/v1/auth/me` | the new session-retry test red | red, and only that one. This is the defect Vinay hit on 19 November, reproduced on demand | local, Vitest |
+| 37 | **The 15-second per-attempt ceiling restored**, both as the constant and hard-coded at the call site | the ceiling test red | red both ways on the second attempt. **The first version of that test was vacuous**: it asserted a getter that returned the constant, so hard-coding a different value at the call site went straight past it. The test now reads the ceiling the loop reports | local, Vitest |
 
-Rows 8, 10, 17, 18, 22, 32 and 36 are the ones worth reading.
+Rows 8, 10, 17, 18, 22, 32, 36 and 37 are the ones worth reading.
 
 **Row 22 found a defect in the fix it was testing.** Deleting the padding was
 meant to prove only that the hit-test test could fail. It reddened two further
