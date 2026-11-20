@@ -36,19 +36,38 @@ import { ApiError, request } from "./client";
  * is what makes polling it the honest choice rather than an expensive one.
  */
 
-/** A per-attempt ceiling, so one hung connection cannot eat the whole budget. */
-const ATTEMPT_TIMEOUT_MS = 15_000;
+/**
+ * A per-attempt ceiling, so one hung connection cannot eat the whole budget.
+ *
+ * **This number was 15 seconds, and that made the whole loop incapable of
+ * succeeding.** A cold response from this service takes about 38 seconds
+ * (measured 19 November: `curl` direct, `200` in 38.6s, with the two that
+ * followed in 0.3s and 0.2s). Every attempt was therefore aborted twenty-three
+ * seconds before the answer arrived, and no amount of retrying could change
+ * that: ten attempts of 15 seconds plus backoff is 184 seconds, which is
+ * exactly the "I waited 181 seconds" Vinay was shown, twice.
+ *
+ * > **A per-attempt timeout shorter than the operation it is waiting for turns
+ * > a retry loop into a guarantee of failure.** The 15 was an assumption about
+ * > how long a cold start takes. 38.6 is a measurement.
+ *
+ * 75 seconds gives that measurement roughly double the headroom. The thing it
+ * still protects against is a connection that hangs for ever, which now costs
+ * a third of the budget rather than the whole of it.
+ */
+const ATTEMPT_TIMEOUT_MS = 75_000;
+
 
 /**
  * Total time to keep trying.
  *
- * Render's documentation says "up to a minute". The measurement that matters
- * more: on 19 November the instance had not answered a real request after 51
- * seconds. A budget that expires while the thing is still starting produces an
- * error message about a working system, so this is set well past the
- * documented figure.
+ * Render's documentation says "up to a minute"; the measured cold response is
+ * about 38 seconds once a request is actually allowed to finish. The budget
+ * has to hold at least two or three of those, because a browser's first
+ * attempt can land while the container is still being scheduled rather than
+ * merely booting.
  */
-export const WAKE_BUDGET_MS = 180_000;
+export const WAKE_BUDGET_MS = 240_000;
 
 const FIRST_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 4_000;
@@ -58,6 +77,15 @@ export interface WakeState {
   readonly attempt: number;
   /** Milliseconds since the first attempt. */
   readonly elapsedMs: number;
+  /**
+   * The ceiling this attempt is running under.
+   *
+   * Reported rather than inferred, so a test can hold the number the loop
+   * *applies* against a measured cold start. An earlier version of that test
+   * asserted a getter that returned the constant, and a mutation which
+   * hard-coded a different value at the call site sailed past it.
+   */
+  readonly ceilingMs: number;
 }
 
 /**
@@ -116,6 +144,12 @@ export interface KeepTryingOptions {
   budgetMs?: number;
   signal?: AbortSignal;
   now?: () => number;
+  /**
+   * Override the per-attempt ceiling. Only tests pass this: it is what lets
+   * the relationship between the ceiling and a slow operation be exercised at
+   * millisecond scale, with real timers, rather than asserted about constants.
+   */
+  attemptTimeoutMs?: number;
 }
 
 /**
@@ -141,11 +175,13 @@ export async function keepTrying<T>(
   let delay = FIRST_DELAY_MS;
   let last: unknown = null;
 
+  const ceilingMs = options.attemptTimeoutMs ?? ATTEMPT_TIMEOUT_MS;
+
   for (;;) {
     attempts += 1;
-    onState?.({ attempt: attempts, elapsedMs: now() - started });
+    onState?.({ attempt: attempts, elapsedMs: now() - started, ceilingMs });
     try {
-      return await attempt(AbortSignal.timeout(ATTEMPT_TIMEOUT_MS));
+      return await attempt(AbortSignal.timeout(ceilingMs));
     } catch (error: unknown) {
       last = error;
       if (options.signal?.aborted === true) throw error;

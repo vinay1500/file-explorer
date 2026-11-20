@@ -180,3 +180,68 @@ describe("keepTrying, which is what the page actually uses", () => {
     expect(result.error).toBe(boom);
   });
 });
+
+describe("the per-attempt ceiling, against a measured cold start", () => {
+  // Measured on the deployed service, 19 November: a cold response took
+  // **38.6 seconds**, and the two requests after it took 0.3s and 0.2s.
+  const MEASURED_COLD_RESPONSE_MS = 38_600;
+
+  it("is longer than a cold response, or the loop can never succeed", async () => {
+    // The ceiling was 15 seconds. Every attempt was therefore aborted
+    // twenty-three seconds before the answer arrived, and ten attempts of
+    // that is 184 seconds -- exactly the "I waited 181 seconds" the page
+    // showed Vinay, twice. The budget was not the problem; raising it to 180
+    // only made the same failure arrive later.
+    //
+    // This test exists so that number can never again be set from an
+    // assumption about how long a cold start takes.
+    // Read off the loop itself rather than from a getter: the first version of
+    // this asserted a function that returned the constant, and a mutation
+    // which hard-coded 15 seconds at the call site went straight past it.
+    let ceiling = 0;
+    fetchMock.mockResolvedValue(UP);
+    await settle(
+      wakeApi((state) => {
+        ceiling = state.ceilingMs;
+      }),
+    );
+
+    expect(
+      ceiling,
+      `the per-attempt ceiling the loop applies is ${String(ceiling)}ms and a cold response ` +
+        `takes ${String(MEASURED_COLD_RESPONSE_MS)}ms, so no attempt could finish`,
+    ).toBeGreaterThan(MEASURED_COLD_RESPONSE_MS);
+  });
+
+  it("lets a slow attempt finish when the ceiling is above it, and never when it is below", async () => {
+    // Real timers at millisecond scale, because `AbortSignal.timeout` is a
+    // platform API and vitest's fake clock does not drive it -- the first
+    // version of this test used fake timers, so the abort never fired and it
+    // passed against the 15-second ceiling it was written to catch. A test
+    // that cannot see the thing it names is worse than no test.
+    vi.useRealTimers();
+
+    const slow = (ms: number) => (signal: AbortSignal) =>
+      new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          resolve("awake");
+        }, ms);
+        signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          reject(new DOMException("timed out", "TimeoutError"));
+        });
+      });
+
+    // Ceiling above the operation: one attempt, and it completes.
+    await expect(
+      keepTrying(slow(60), undefined, { attemptTimeoutMs: 300, budgetMs: 2_000 }),
+    ).resolves.toBe("awake");
+
+    // Ceiling below the operation: **no budget can rescue this.** Every
+    // attempt is cut off before the answer arrives, which is precisely what
+    // happened in production, ten times in a row, for 181 seconds.
+    await expect(
+      keepTrying(slow(400), undefined, { attemptTimeoutMs: 50, budgetMs: 600 }),
+    ).rejects.toBeInstanceOf(StillWaking);
+  }, 10_000);
+});
