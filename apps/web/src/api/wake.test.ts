@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./client";
-import { StillWaking, isColdStart, keepTrying, wakeApi } from "./wake";
+import { StillWaking, WAKE_ORIGIN, isColdStart, keepTrying, wakeApi } from "./wake";
 
 /**
  * The cold start, which is the first thing a visitor meets and was the first
@@ -18,6 +18,15 @@ function reply(status: number, body: unknown, ok = status < 400): Response {
 }
 
 const UP = reply(200, { status: "ok", db: "ok" });
+
+/**
+ * A knock that does nothing.
+ *
+ * The real one is a cross-origin `fetch`, so in any test that counts `fetch`
+ * calls it would be counted as an attempt and the numbers would stop meaning
+ * what they say. The knock has its own tests, at the bottom of this file.
+ */
+const quiet = (): Promise<void> => Promise.resolve();
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -106,7 +115,7 @@ describe("wakeApi", () => {
   it("gives up when the budget runs out, and says so in its own type", async () => {
     fetchMock.mockResolvedValue(reply(502, null, false));
 
-    const result = (await settle(wakeApi(undefined, { budgetMs: 10_000 }))) as {
+    const result = (await settle(wakeApi(undefined, { budgetMs: 10_000, nudge: quiet }))) as {
       ok: boolean;
       error: unknown;
     };
@@ -129,7 +138,7 @@ describe("wakeApi", () => {
     fetchMock.mockResolvedValueOnce(reply(502, null, false)).mockResolvedValueOnce(UP);
     const seen: number[] = [];
 
-    await settle(wakeApi((state) => seen.push(state.attempt)));
+    await settle(wakeApi((state) => seen.push(state.attempt), { nudge: quiet }));
 
     expect(seen).toEqual([1, 2]);
   });
@@ -244,4 +253,83 @@ describe("the per-attempt ceiling, against a measured cold start", () => {
       keepTrying(slow(400), undefined, { attemptTimeoutMs: 50, budgetMs: 600 }),
     ).rejects.toBeInstanceOf(StillWaking);
   }, 10_000);
+
+  /**
+   * F-74, and it is the reason this file has been rewritten three times.
+   *
+   * The loop was never wrong. It was knocking on a door that does not open:
+   * every request a browser makes goes through the Vercel rewrite, and a
+   * rewrite to a sleeping Render instance returns `502 no-deploy` without
+   * waking it. Measured with the instance idle sixteen minutes -- direct to
+   * the origin, held open and `200` in 32.5s; through the rewrite, `502`
+   * twelve times in 87 seconds and still asleep afterwards.
+   *
+   * So the loop now knocks on the origin itself. These tests are about *when*
+   * it knocks, because knocking on every attempt would put twenty simultaneous
+   * requests at a service that is trying to boot, and knocking when the
+   * service is warm is a cross-origin request nobody asked for.
+   */
+  describe("the wake knock", () => {
+    it("does not knock at all when the first attempt succeeds", async () => {
+      vi.useRealTimers();
+      const nudge = vi.fn(() => Promise.resolve());
+
+      await expect(keepTrying(() => Promise.resolve("awake"), undefined, { nudge })).resolves.toBe(
+        "awake",
+      );
+
+      // A warm service is the common case. It should cost no cross-origin
+      // request at all.
+      expect(nudge).not.toHaveBeenCalled();
+    });
+
+    it("knocks once a cold start is confirmed, and only once however many attempts follow", async () => {
+      vi.useRealTimers();
+      // A knock that stays pending, exactly as a real one does: Render holds
+      // the connection open for the whole boot.
+      const settlers: (() => void)[] = [];
+      const nudge = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settlers.push(resolve);
+          }),
+      );
+
+      let calls = 0;
+      const attempt = (): Promise<string> => {
+        calls += 1;
+        // Three 502s, then up -- the shape of a real cold start behind the
+        // rewrite once the origin has been knocked on. Three rather than more
+        // because the backoff is real: 1s, 2s, 3s is six seconds of honest
+        // waiting and five failures would be fourteen.
+        if (calls <= 3) return Promise.reject(new ApiError(502, null));
+        return Promise.resolve("awake");
+      };
+
+      const result = await keepTrying(attempt, undefined, {
+        nudge,
+        budgetMs: 30_000,
+        attemptTimeoutMs: 500,
+      });
+
+      expect(result).toBe("awake");
+      expect(calls).toBe(4);
+      // Six attempts, five of them failures, and **one** knock. Stacking a
+      // knock per attempt is the mistake this asserts against.
+      expect(nudge).toHaveBeenCalledTimes(1);
+      settlers.forEach((done) => {
+        done();
+      });
+    }, 20_000);
+
+    it("aims the knock at the host vercel.json rewrites to, with no trailing slash", () => {
+      // The constant is checked against `vercel.json` by
+      // `test_deploy_config.py`. This holds the shape, so a value that is a
+      // path, a relative URL, or the frontend's own origin cannot pass -- any
+      // of those would send the knock back through the rewrite and reproduce
+      // the defect exactly.
+      expect(WAKE_ORIGIN).toMatch(/^https:\/\/[a-z0-9-]+\.onrender\.com$/);
+      expect(WAKE_ORIGIN).not.toContain("vercel.app");
+    });
+  });
 });

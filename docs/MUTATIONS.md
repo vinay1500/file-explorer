@@ -87,8 +87,11 @@ every command is proven.
 | 38 | `createNode(name, adding.type, adding.parent)` reverted to `createNode(name, "folder", null)` | the three creation tests red | red: 3 of 4, and the folder-at-top-level test stayed green, which is what makes the other three mean something | local, Chromium |
 | 39 | **`.actions` returned to `opacity: 0`** | the visibility test red | red, 1 failed and **6 passed** — **every test that clicks those controls stayed green**, which is the whole finding. Playwright clicks by accessible name and opacity does not stop it, so six green tests covered a control no person could see | local, Chromium |
 | 40 | The destination `<select>` hard-wired to `null`, ignoring what was chosen | the two picker tests red | red both, 2 failed and 5 passed. The five older tests stayed green because none of them changes the destination — which is precisely the state the suite was in while F-73 was live | local, Chromium |
+| 41 | **`WAKE_ORIGIN` pointed back at the frontend host**, so the wake knock goes through the rewrite again | the knock-target test red | red, 1 failed and 16 passed. This mutation *is* F-74: it restores the exact configuration in which no budget and no ceiling could ever succeed | local, Vitest |
+| 42 | **The knock removed from the loop entirely** — the client as it stood through M8, M12 and M13 | the knock test red | red, 1 failed and 16 passed. Every other test in the file stayed green, which is the honest measure of how little the previous two fixes were tested against the thing that was wrong | local, Vitest |
+| 43 | The one-knock guard removed, so every retry knocks | the knock test red | red. Twenty-odd simultaneous requests at a container that is trying to boot is the opposite failure, and it would look like a fix | local, Vitest |
 
-Rows 8, 10, 17, 18, 22, 32, 36, 37 and 39 are the ones worth reading.
+Rows 8, 10, 17, 18, 22, 32, 36, 37, 39 and 42 are the ones worth reading.
 
 **Row 22 found a defect in the fix it was testing.** Deleting the padding was
 meant to prove only that the hit-test test could fail. It reddened two further
@@ -119,6 +122,15 @@ to find it first. Two defects now (F-62, F-73) have lived entirely inside that
 gap, so the rule is written down rather than remembered: **an interactive
 element needs an assertion about what is rendered -- a size, a position, an
 opacity -- and not only one about what happens when it is clicked.**
+
+**Row 42 is the one to sit with.** It deletes the wake knock, which is the
+state this client was in for three days and three fixes, and **exactly one
+test notices.** Everything else in the file — the ceiling against a measured
+cold response, the budget, which failures mean "not yet", the attempt counter —
+stays green, because all of it was correct. The loop was never the defect. It
+was being pointed at a path that cannot wake the service, and nothing in this
+repository was asking that question until a `curl` was run against both
+hostnames with the instance genuinely asleep.
 
 **8** is a test that could not fail, found by mutation and by nothing else.
 

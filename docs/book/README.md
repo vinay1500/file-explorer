@@ -77,7 +77,7 @@ The machinery around the code.
 | # | Chapter | Status |
 |---|---|---|
 | 18 | [Questions and answers](18-questions-and-answers.md) | **written** · Q1–Q19; the rest live in their own chapters |
-| 19 | [Five deep dives](19-five-deep-dives.md) | **written** |
+| 19 | [Six deep dives](19-five-deep-dives.md) | **written** |
 | 20 | [The stories to tell](20-the-stories-to-tell.md) | **written** |
 
 ---

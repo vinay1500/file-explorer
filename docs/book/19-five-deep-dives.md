@@ -1,10 +1,10 @@
-# Chapter 19 · Five deep dives
+# Chapter 19 · Six deep dives
 
 > Volume V · The Defence
 > Written at M9 · last verified 2026-11-19
 
 [Chapter 20](20-the-stories-to-tell.md) is about which stories to tell. This one is the
-technical content behind five of them: **what to draw, in what order, and where the question
+technical content behind six of them: **what to draw, in what order, and where the question
 goes next.**
 
 Each dive is ten minutes at a whiteboard. If you cannot draw the diagram from memory, you do not
@@ -195,6 +195,48 @@ it points at the service this repository declares.
 
 ---
 
+## Dive 6 · Three fixes to a mechanism that was already working
+
+**Draw first:** two arrows at the same host, one of which wakes it.
+
+```
+browser ──▶ vercel.app/api/* ──rewrite──▶ onrender.com   502 no-deploy, instantly
+                                                          (and still asleep)
+
+browser ──▶ onrender.com/api/v1/health  ──────────────▶   held open, 200 in 32.5s
+                                                          (now awake)
+```
+
+**Say, in order:**
+
+1. A free instance sleeps after fifteen idle minutes. The client retries, with a budget and a
+   per-attempt ceiling, and reports the wait rather than an error.
+2. It failed anyway, three times, over three days. Each time I fixed the retry: what it waited
+   *on*, then how *long* each attempt was allowed. Each fix was correct and none of them worked.
+3. The measurement nobody had taken: leave it asleep for sixteen minutes, then ask both
+   hostnames. **Direct, the request is held open and answers in 32.5 seconds. Through the
+   rewrite, 502 twelve times in 87 seconds — and the instance is still asleep afterwards.**
+4. So the loop was never the defect. Every request a browser makes goes through the rewrite, and
+   a request through the rewrite cannot wake the service. No budget and no ceiling could have
+   succeeded.
+5. The fix is four lines: once a cold start is confirmed, knock once on the API's own origin with
+   an opaque `no-cors` request that reads nothing, and go on retrying the same-origin request
+   whose answer the page actually needs.
+
+**The point to land:** *when a fix does not work, the next question is not "what else is wrong
+with the fix".* It is whether the thing being fixed is the thing that is broken. Three
+consecutive corrections to a working mechanism is what that mistake looks like from the inside,
+and it is cheap to make because each correction is individually defensible.
+
+**Where it goes next:** "how did you verify it?" → the same way, and that is the real lesson.
+The first fix was verified against mocked 502s. The second against mocked 502s. The third
+against a `curl` run *during* the wait — which is what woke the service, so I recorded somebody
+else's success as my own. The fourth was verified by letting the instance sleep, knocking at the
+origin, and watching the rewrite path go from 502 to 200 thirty seconds later. **Every
+verification but the last one tested the client instead of the path the client uses.**
+
+---
+
 ## How to practise these
 
 1. Draw the diagram from memory. If it comes out wrong, you do not have the dive.
@@ -202,8 +244,8 @@ it points at the service this repository declares.
 3. Have somebody ask the "where it goes next" question and answer that too — that is the part
    that separates a rehearsed story from an understood one.
 
-Four of the five are things that were wrong in code that shipped, and dive 4 has now happened
-twice. The fifth — dive 2 — is the
+Five of the six are things that were wrong in code that shipped; dive 4 has now happened twice,
+and dive 6 shipped three times. The fifth — dive 2 — is the
 one where the first fix was incomplete, and it is the most valuable of them for exactly that
 reason.
 

@@ -164,6 +164,100 @@ def test_the_rewrite_points_at_the_service_this_repository_declares() -> None:
 
 
 @pytest.mark.invariant
+def test_the_wake_ping_aims_at_the_same_host_the_rewrite_does() -> None:
+    """The one absolute URL in the frontend, and the one that cannot be wrong.
+
+    F-74: a sleeping Render instance **cannot be woken through the Vercel
+    rewrite**. Measured with the instance idle sixteen minutes -- direct to the
+    origin the request is held open and answers `200` in 32.5s; through the
+    rewrite it is `502` twelve times in 87 seconds, every one carrying
+    `x-render-routing: no-deploy`, and the instance is still asleep afterwards.
+
+    So the client now knocks on the origin directly before retrying the
+    same-origin request it actually needs. That puts a hostname in the
+    TypeScript as well as in `vercel.json`, and a hostname in two files is
+    exactly the shape of F-23 and of the stale-rewrite bug above.
+
+    The failure this prevents is silent and would look identical to the defect
+    it fixes: a knock aimed at a host this project no longer deploys to never
+    wakes anything, the page waits out its whole budget, and the retry loop
+    takes the blame for the third time.
+    """
+    wake = (ROOT / "apps" / "web" / "src" / "api" / "wake.ts").read_text(encoding="utf-8")
+    declared = re.search(r'export const WAKE_ORIGIN\s*=\s*"([^"]+)"', wake)
+    assert declared, "wake.ts no longer declares WAKE_ORIGIN"
+    origin = declared.group(1)
+
+    rewrite = VERCEL.read_text(encoding="utf-8")
+    host = REWRITE_HOST.search(rewrite)
+    assert host, "vercel.json has no https rewrite destination"
+
+    assert origin == f"https://{host.group(1)}", (
+        f"wake.ts knocks on {origin!r} and vercel.json rewrites to {host.group(1)!r}; a knock "
+        "at a host this repository does not deploy to wakes nothing and looks exactly like F-74"
+    )
+    assert not origin.endswith("/"), (
+        "WAKE_ORIGIN carries a trailing slash, so the knock would request a double-slashed path"
+    )
+
+
+@pytest.mark.invariant
+def test_the_frontend_calls_fetch_in_exactly_two_places() -> None:
+    """The wake knock is the single exception to D-22, and it stays single.
+
+    `client.ts` throws on any path that does not start with `/api/`, which is
+    what keeps every real request same-origin and therefore what lets a
+    `SameSite=Lax` session cookie work at all (F-11, D-22). The knock added for
+    F-74 sits outside that client deliberately, because it is cross-origin by
+    design and reads nothing.
+
+    One exception is a decision. Two is a pattern, and the second one will be
+    the request that carries a cookie somewhere it cannot be stored. So this
+    counts them, and names them, rather than trusting that nobody adds a third.
+    """
+    src = ROOT / "apps" / "web" / "src"
+    callers: list[str] = []
+    for path in sorted(src.rglob("*.ts")) + sorted(src.rglob("*.tsx")):
+        if ".test." in path.name:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if re.search(r"(?<![.\w])fetch\s*\(", line):
+                callers.append(str(path.relative_to(ROOT)))
+                break
+
+    assert sorted(set(callers)) == [
+        "apps/web/src/api/client.ts",
+        "apps/web/src/api/wake.ts",
+    ], (
+        "fetch belongs in client.ts, which forbids absolute URLs, and in wake.ts, whose one "
+        f"cross-origin knock is the documented F-74 exception. Found it in: {sorted(set(callers))}"
+    )
+
+
+@pytest.mark.invariant
+def test_the_only_cross_origin_request_sends_no_cookie() -> None:
+    """A knock that carried the session would be a cookie sent cross-site.
+
+    It would not be *stored* -- that is D-22's whole point -- but sending a
+    session identifier to an origin the browser will not accept one from is
+    the kind of thing that is correct today and a finding tomorrow. The knock
+    reads nothing, so it needs nothing.
+    """
+    wake = (ROOT / "apps" / "web" / "src" / "api" / "wake.ts").read_text(encoding="utf-8")
+    init = re.search(r"const init: RequestInit = \{(.*?)\};", wake, re.S)
+    assert init, "wake.ts no longer builds the knock's RequestInit in the expected shape"
+    options = init.group(1)
+    assert 'credentials: "omit"' in options, "the cross-origin wake knock must send no credentials"
+    assert 'mode: "no-cors"' in options, (
+        "the knock reads nothing, so it is no-cors; anything else needs a CORS header the API "
+        "deliberately does not send"
+    )
+    assert "WAKE_ORIGIN" in wake and "await fetch(" in wake, (
+        "wake.ts no longer makes the knock at all"
+    )
+
+
+@pytest.mark.invariant
 def test_the_rewrite_keeps_the_path_and_stays_on_https() -> None:
     """The rewrite is what makes the cookie same-site, so its shape matters.
 
