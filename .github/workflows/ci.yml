@@ -550,20 +550,39 @@ jobs:
           path: apps/web/test-results/
           retention-days: 7
 
-      - name: No API hostname is baked into the bundle
+      - name: The API hostname appears in the bundle exactly once
         run: |
           # Without this, a missing `dist` makes grep error, `hits` empty, and
           # the step print "clean" and exit 0 -- a guard that passes because
           # there was nothing to guard. It is correct today only because the
           # Build step happens to run first.
           test -d dist || { echo "::error::there is no dist/ to check"; exit 1; }
-          hits=$(grep -rlE 'https?://[a-z0-9.-]*onrender\.com' dist 2>/dev/null || true)
-          if [ -n "$hits" ]; then
-            echo "::error::the API hostname is compiled into the bundle, which bypasses the rewrite"
-            echo "$hits"
+
+          # This asked for ZERO until M16, and zero was right while every
+          # request was relative. F-74 changed that: a sleeping Render
+          # instance CANNOT be woken through the Vercel rewrite -- 502
+          # no-deploy, measured twelve times in 87 seconds, still asleep
+          # afterwards -- so the client knocks once on the API's own origin
+          # before retrying the same-origin request it needs. That knock is
+          # one absolute URL, on purpose.
+          #
+          # One is therefore the correct number, and it is a stronger
+          # assertion than zero was: it fails if somebody adds a SECOND
+          # absolute call, and it also fails if the knock is deleted. What
+          # keeps the knock honest is not this grep but two tests in
+          # test_deploy_config.py -- that fetch is called in exactly two
+          # files, and that the knock sends `credentials: "omit"`.
+          #
+          # The sourcemap is excluded: it carries the original source, so it
+          # always holds one more copy and counting it would mean counting
+          # the same line twice.
+          hits=$(grep -roE 'https?://[a-z0-9.-]*onrender\.com' dist --include='*.js' --include='*.css' --include='*.html' | wc -l | tr -d ' ')
+          if [ "$hits" != "1" ]; then
+            echo "::error::the API hostname appears $hits times in the bundle; exactly one is correct (the F-74 wake knock)"
+            grep -rnE 'https?://[a-z0-9.-]*onrender\.com' dist --include='*.js' --include='*.css' --include='*.html' | head -5
             exit 1
           fi
-          echo "  clean: every API call is relative"
+          echo "  clean: one absolute URL, and it is the wake knock; every other API call is relative"
 
   tests:
     name: tests

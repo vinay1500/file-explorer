@@ -244,15 +244,16 @@ def test_the_only_cross_origin_request_sends_no_cookie() -> None:
     reads nothing, so it needs nothing.
     """
     wake = (ROOT / "apps" / "web" / "src" / "api" / "wake.ts").read_text(encoding="utf-8")
-    knock = re.search(r"await fetch\(`\$\{WAKE_ORIGIN\}[^`]*`,\s*\{(.*?)\}\);", wake, re.S)
-    assert knock, "wake.ts no longer contains the WAKE_ORIGIN knock in the expected shape"
-    options = knock.group(1)
-    assert 'credentials: "omit"' in options, (
-        "the cross-origin wake knock must send no credentials"
-    )
+    init = re.search(r"const init: RequestInit = \{(.*?)\};", wake, re.S)
+    assert init, "wake.ts no longer builds the knock's RequestInit in the expected shape"
+    options = init.group(1)
+    assert 'credentials: "omit"' in options, "the cross-origin wake knock must send no credentials"
     assert 'mode: "no-cors"' in options, (
         "the knock reads nothing, so it is no-cors; anything else needs a CORS header the API "
         "deliberately does not send"
+    )
+    assert "WAKE_ORIGIN" in wake and "await fetch(" in wake, (
+        "wake.ts no longer makes the knock at all"
     )
 
 
