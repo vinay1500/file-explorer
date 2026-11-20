@@ -86,9 +86,10 @@ test("the button on a folder puts the new item inside that folder", async ({ pag
   await expect(page.getByText("projects")).toBeVisible();
 
   await page.getByRole("button", { name: "New item inside projects" }).click();
-  // The form says where it is going, because it is rendered above the tree
-  // rather than as a row inside the folder.
-  await expect(page.getByLabel("Where the new file goes")).toHaveValue("1");
+  // The form still says where it is going -- it is rendered above the tree
+  // rather than as a row inside the folder, so without that there is nothing
+  // on screen naming the destination. It states it; it no longer asks.
+  await expect(page.locator(".new-where.fixed")).toContainText("projects");
   await page.getByLabel("Name for the new file").fill("README.md");
   await page.getByRole("button", { name: "Create" }).click();
 
@@ -189,4 +190,89 @@ test("a nested folder is offered by its path, not by its bare name", async ({ pa
 
   await expect.poll(() => created.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
   expect(created.bodies[0]).toEqual({ name: "plan.md", type: "file", parent_id: 2 });
+});
+
+/**
+ * F-76. Vinay, using it: *"if we clicked + on some folder then we already want
+ * to make a file in that folder not anywhere else, but here we can select a
+ * different folder as well that is i think not correct."*
+ *
+ * He is right, and the code already agreed with him in a comment: the row's
+ * button answers "put something in **this** folder" and the header button
+ * asks "where does this go". Two questions, and one picker was answering both
+ * -- so the gesture that settled the destination was immediately followed by
+ * a control inviting a different one.
+ *
+ * These two tests are a pair on purpose. Removing the picker everywhere would
+ * reopen F-73, where creating inside a folder was possible and unreachable.
+ * The second test is what stops the fix from going too far.
+ */
+test("the plus on a row settles the destination, and offers no way to change it", async ({
+  page,
+}) => {
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  await page.getByRole("button", { name: "New item inside projects" }).click();
+
+  // The question is not asked again.
+  await expect(page.getByLabel("Where the new file goes")).toHaveCount(0);
+  // And the answer is on screen, which is the half of the picker worth having.
+  await expect(page.locator(".new-where.fixed")).toContainText("projects");
+});
+
+test("the header button still asks, because nothing has answered yet", async ({ page }) => {
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  await page.getByRole("button", { name: "New file", exact: true }).click();
+  await expect(page.getByLabel("Where the new file goes")).toBeVisible();
+
+  // And choosing a folder there must not turn the picker into a statement
+  // half way through -- the reason `fixed` is its own field and not
+  // `parent !== null`.
+  await page.getByLabel("Where the new file goes").selectOption("1");
+  await expect(page.getByLabel("Where the new file goes")).toBeVisible();
+  await expect(page.getByLabel("Where the new file goes")).toHaveValue("1");
+});
+
+test("the settled destination is readable, not just present in the DOM", async ({ page }) => {
+  // F-62 and F-73 were both controls that existed, passed their tests, and
+  // could not be seen. A destination nobody can read is the same bug wearing
+  // the fix's clothes.
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+  await expect(page.getByText("projects")).toBeVisible();
+
+  await page.getByRole("button", { name: "New item inside projects" }).click();
+  const where = page.locator(".new-where.fixed");
+  await expect(where).toBeVisible();
+  const box = await where.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.height ?? 0).toBeGreaterThan(8);
+  expect(
+    await where.evaluate((el) => Number(getComputedStyle(el).opacity)),
+  ).toBeGreaterThan(0.9);
+});
+
+test("a nested destination is stated by its path, not its bare name", async ({ page }) => {
+  const created: Created = { bodies: [] };
+  await stubApi(page, created);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Expand projects" }).click();
+  await expect(page.getByText("2026")).toBeVisible();
+
+  await page.getByRole("button", { name: "New item inside 2026" }).click();
+  // "2026" alone is ambiguous the moment a second folder is called 2026.
+  await expect(page.locator(".new-where.fixed")).toContainText("projects / 2026");
+
+  await page.getByLabel("Name for the new file").fill("notes.md");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect.poll(() => created.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
+  expect(created.bodies[0]).toEqual({ name: "notes.md", type: "file", parent_id: 2 });
 });

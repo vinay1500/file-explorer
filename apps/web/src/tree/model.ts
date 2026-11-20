@@ -130,3 +130,42 @@ export function subtreeIds(nodes: NodeModel<NodeData>[], id: NodeModel["id"]): S
   }
   return found;
 }
+
+/**
+ * The chain of ancestors from the top level down to `id`, inclusive.
+ *
+ * The API has had `GET /nodes/{id}/path` since M3a and it answers exactly
+ * this, with a recursive CTE that filters by owner in its recursive term as
+ * well as its anchor. This computes it in the page instead, for one reason:
+ * a node can only be looked at after its ancestors have been expanded, so
+ * every ancestor is already in `nodes` and a round trip would buy nothing but
+ * latency. The endpoint stays the answer for a caller that has an id and no
+ * tree.
+ *
+ * `complete` is the part worth having. If the walk runs out of ancestors
+ * before it reaches the top -- a partially loaded tree, a node whose parent
+ * has been evicted -- the crumbs are still returned, and they are still true
+ * as far as they go, but they no longer start at the top level. Returning
+ * them unmarked would print a path that silently begins in the middle, which
+ * is the failure this project keeps meeting: a correct-looking answer with no
+ * way to tell it is partial.
+ */
+export function crumbsFor(
+  nodes: NodeModel<NodeData>[],
+  id: NodeModel["id"],
+): { crumbs: NodeModel<NodeData>[]; complete: boolean } {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const crumbs: NodeModel<NodeData>[] = [];
+  let cur = byId.get(id);
+  if (cur === undefined) return { crumbs, complete: false };
+  // The server caps depth at 64. The bound is against a cycle that should be
+  // impossible rather than against a deep tree.
+  for (let hops = 0; hops <= 64; hops += 1) {
+    crumbs.unshift(cur);
+    if (cur.parent === ROOT_ID) return { crumbs, complete: true };
+    const next = byId.get(cur.parent);
+    if (next === undefined) return { crumbs, complete: false };
+    cur = next;
+  }
+  return { crumbs, complete: false };
+}

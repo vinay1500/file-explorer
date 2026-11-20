@@ -18,6 +18,7 @@ import {
 import { kindOf } from "../ui/fileKind";
 import {
   ROOT_ID,
+  crumbsFor,
   mergeNodes,
   subtreeFullyLoaded,
   subtreeIds,
@@ -105,12 +106,30 @@ export function Explorer() {
   const [busy, setBusy] = useState(false);
   const [renaming, setRenaming] = useState<Tn | null>(null);
   const [draft, setDraft] = useState("");
-  // What is being created, and where. `null` means nothing is being created;
-  // a `parent` of `null` inside it means the top level.
-  const [adding, setAdding] = useState<{ type: "folder" | "file"; parent: number | null } | null>(
-    null,
-  );
+  /**
+   * What is being created, and where. `null` means nothing is being created;
+   * a `parent` of `null` inside it means the top level.
+   *
+   * `fixed` records how the form was opened, and it exists because F-76 --
+   * Vinay: "if we clicked + on some folder then we already want to make a
+   * file in that folder not anywhere else". A row's + already answers the
+   * destination question; asking it again, with every other folder on the
+   * list, invites the wrong answer to a question nobody asked.
+   *
+   * It has to be its own field rather than `parent !== null`. Opening the
+   * header form and choosing Documents also makes the parent non-null, and
+   * keying off that would make the picker disappear from under the pointer
+   * at the moment it was used.
+   */
+  const [adding, setAdding] = useState<{
+    type: "folder" | "file";
+    parent: number | null;
+    fixed: boolean;
+  } | null>(null);
   const [newName, setNewName] = useState("");
+  // The row last clicked. Only the breadcrumb reads it: it is "where you are"
+  // in the Windows sense, not a selection the other controls act on.
+  const [here, setHere] = useState<Tn | null>(null);
   const [confirming, setConfirming] = useState<Tn | null>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const returnFocusTo = useRef<HTMLElement | null>(null);
@@ -346,8 +365,8 @@ export function Explorer() {
     }
   };
 
-  const startCreating = (type: "folder" | "file", parent: number | null) => {
-    setAdding({ type, parent });
+  const startCreating = (type: "folder" | "file", parent: number | null, fixed: boolean) => {
+    setAdding({ type, parent, fixed });
     setNewName("");
   };
 
@@ -393,6 +412,14 @@ export function Explorer() {
       .sort((a, b) => a.label.localeCompare(b.label));
   })();
 
+  /** The path of wherever the open form is pointing, for the fixed case. */
+  const destinationLabel =
+    adding === null || adding.parent === null
+      ? null
+      : (folderChoices.find((f) => f.id === adding.parent)?.label ?? null);
+
+  const trail = here === null ? null : crumbsFor(nodes, here.id);
+
   return (
     <section className="explorer panel" aria-busy={busy}>
       <div className="ex-head">
@@ -402,7 +429,7 @@ export function Explorer() {
             type="button"
             className="primary small"
             onClick={() => {
-              startCreating("folder", null);
+              startCreating("folder", null, false);
             }}
             disabled={busy || adding !== null}
           >
@@ -412,7 +439,7 @@ export function Explorer() {
             type="button"
             className="small"
             onClick={() => {
-              startCreating("file", null);
+              startCreating("file", null, false);
             }}
             disabled={busy || adding !== null}
           >
@@ -420,6 +447,56 @@ export function Explorer() {
           </button>
         </div>
       </div>
+
+      {/*
+        Where you are, the way a file manager says it. The API answers this at
+        GET /nodes/{id}/path with a recursive CTE; this reads it off the
+        loaded tree instead, because a row can only be clicked after its
+        ancestors have been expanded, so the answer is already in memory and a
+        round trip would only add latency to a click.
+      */}
+      <nav className="crumbs" aria-label="Where you are">
+        <button
+          type="button"
+          className="crumb"
+          aria-current={here === null ? "location" : undefined}
+          onClick={() => {
+            setHere(null);
+          }}
+        >
+          Top level
+        </button>
+        {trail !== null && !trail.complete && (
+          // The walk did not reach the top. Saying so beats printing a path
+          // that looks absolute and begins in the middle.
+          <span className="crumb-gap" title="Part of this path is not loaded">
+            &hellip;
+          </span>
+        )}
+        {trail?.crumbs.map((c, i) => {
+          const last = i === trail.crumbs.length - 1;
+          return (
+            <span key={String(c.id)} className="crumb-wrap">
+              <span className="crumb-sep" aria-hidden="true">
+                /
+              </span>
+              <button
+                type="button"
+                className={`crumb ${last ? "crumb-here" : ""}`}
+                aria-current={last ? "location" : undefined}
+                // Only the marker moves. The tree owns its own open state --
+                // it is uncontrolled -- and reaching in to expand from here
+                // would mean taking that over for one convenience.
+                onClick={() => {
+                  setHere(c);
+                }}
+              >
+                {c.text}
+              </button>
+            </span>
+          );
+        })}
+      </nav>
 
       {error !== null && (
         <p className="note bad" role="alert">
@@ -489,23 +566,41 @@ export function Explorer() {
               if (e.key === "Escape") setAdding(null);
             }}
           />
-          <label className="new-where">
-            <span>in</span>
-            <select
-              aria-label={`Where the new ${adding.type} goes`}
-              value={adding.parent === null ? "" : String(adding.parent)}
-              onChange={(e) => {
-                setAdding({ ...adding, parent: e.target.value === "" ? null : Number(e.target.value) });
-              }}
-            >
-              <option value="">the top level</option>
-              {folderChoices.map((f) => (
-                <option key={String(f.id)} value={String(f.id)}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {adding.fixed ? (
+            /*
+              The destination was settled by the button that opened this form,
+              so it is stated, not asked. F-76. The name is still here because
+              the form sits above the tree rather than inside the folder, so
+              without it there is nothing on screen saying where this lands --
+              which was the whole point of the picker, and is the only part of
+              it worth keeping.
+            */
+            <span className="new-where fixed">
+              <span>in</span>
+              <strong>{destinationLabel ?? "the top level"}</strong>
+            </span>
+          ) : (
+            <label className="new-where">
+              <span>in</span>
+              <select
+                aria-label={`Where the new ${adding.type} goes`}
+                value={adding.parent === null ? "" : String(adding.parent)}
+                onChange={(e) => {
+                  setAdding({
+                    ...adding,
+                    parent: e.target.value === "" ? null : Number(e.target.value),
+                  });
+                }}
+              >
+                <option value="">the top level</option>
+                {folderChoices.map((f) => (
+                  <option key={String(f.id)} value={String(f.id)}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button type="submit" className="primary small" disabled={busy}>
             Create
           </button>
@@ -533,7 +628,30 @@ export function Explorer() {
             const atTop = node.parent === ROOT_ID;
             return (
               <div
-                className={`row ${isFolder ? "is-folder" : "is-file"} ${depth > 0 ? "indented" : ""}`}
+                className={`row ${isFolder ? "is-folder" : "is-file"} ${depth > 0 ? "indented" : ""} ${
+                  here?.id === node.id ? "is-here" : ""
+                }`}
+                /*
+                  `click`, deliberately, and not `pointerdown`.
+
+                  pointerdown was the first version and it fires at the start
+                  of a drag, which puts a React state update and a re-render
+                  of the row being picked up in the middle of the gesture this
+                  project is named after. A click does not fire during a drag
+                  at all, so this cannot reach it.
+
+                  The difference is not something the browser suite could have
+                  told me: `dragOnto` dispatches synthetic `dragstart` events
+                  because Chromium only emits real ones for a genuine user
+                  drag, so no test here issues a pointerdown in the first
+                  place. A mutation adding `preventDefault()` to the
+                  pointerdown version stayed green through all 28. Choosing
+                  the event that cannot collide beat relying on a test that
+                  cannot see the collision.
+                */
+                onClick={() => {
+                  setHere(node);
+                }}
                 // `--depth` draws the indent guide; the padding does the
                 // indenting itself. Both come from the same number, so a
                 // guide cannot drift away from the row it belongs to.
@@ -592,7 +710,11 @@ export function Explorer() {
                       className="icon-btn"
                       onClick={() => {
                         if (!isOpen) onToggle();
-                        startCreating("file", typeof node.id === "number" ? node.id : Number(node.id));
+                        startCreating(
+                          "file",
+                          typeof node.id === "number" ? node.id : Number(node.id),
+                          true,
+                        );
                       }}
                       aria-label={`New item inside ${node.text}`}
                       title="New item inside this folder"

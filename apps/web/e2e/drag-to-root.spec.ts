@@ -152,3 +152,47 @@ test("dropping a folder onto a folder sends that folder's id, not null", async (
   await expect.poll(() => captured.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
   expect(captured.bodies[0]).toEqual({ new_parent_id: 3 });
 });
+
+/**
+ * The breadcrumb must not cost the drag.
+ *
+ * Clicking a row sets the "you are here" marker, so a drag is now routinely
+ * started from a row that is already marked and re-rendered. This asserts the
+ * drop still reaches the API from that state.
+ *
+ * What it does **not** cover, said plainly because the first version of this
+ * comment claimed otherwise: it cannot catch a regression in the pointer
+ * events themselves. `dragOnto` dispatches synthetic `dragstart` events --
+ * Chromium emits real ones only for a genuine user drag -- so no test in this
+ * file issues a pointerdown at all. A mutation adding `preventDefault()` to
+ * an earlier `onPointerDown` version of the marker stayed green through all
+ * 28 browser tests, twice, including this one. That is mutation 48 in
+ * docs/MUTATIONS.md and it is recorded as **survived**.
+ *
+ * The marker is on `click` rather than `pointerdown` for exactly that reason:
+ * a click never fires during a drag, so the collision this test cannot see is
+ * one the code cannot have.
+ */
+test("a row can still be dragged out after it has been clicked", async ({ page }) => {
+  const captured: Captured = { bodies: [], csrf: [] };
+  await stubApi(page, captured);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Expand projects" }).click();
+  await expect(page.getByText("2026")).toBeVisible();
+
+  // `li`, not the name span: `tree-drop` is applied to the list item, and
+  // `dragOnto` waits for that class. Handing it the span produces a timeout
+  // that reads like a broken drag and is a broken selector.
+  const source = page.locator("li").filter({ hasText: "2026" }).last();
+  const archive = page.locator("li").filter({ hasText: "archive" }).last();
+
+  // Set the marker first. This is the state the user is actually in: they
+  // clicked the thing, saw where they were, and then dragged it.
+  await source.locator(".name").click();
+  await expect(page.getByRole("navigation", { name: "Where you are" })).toContainText("2026");
+
+  await dragOnto(page, source, archive);
+
+  await expect.poll(() => captured.bodies.length, { timeout: 5_000 }).toBeGreaterThan(0);
+  expect(captured.bodies[0]).toEqual({ new_parent_id: 3 });
+});
