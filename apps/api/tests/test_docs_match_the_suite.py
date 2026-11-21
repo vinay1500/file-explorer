@@ -268,7 +268,21 @@ def test_the_book_index_counts_its_own_chapters() -> None:
         path for path in (ROOT / "docs" / "book").iterdir() if re.match(r"^\d\d-", path.name)
     )
 
-    words = {
+    # Spelled out, because the index is prose. Both halves of the sentence are
+    # read, not just the first: it used to say "N of twenty", with the second
+    # number hard-coded here as well -- so adding a chapter needed this test
+    # edited in two places and the sentence in one, which is how a count gets
+    # incremented rather than counted.
+    units = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
         "ten": 10,
         "eleven": 11,
         "twelve": 12,
@@ -280,13 +294,31 @@ def test_the_book_index_counts_its_own_chapters() -> None:
         "eighteen": 18,
         "nineteen": 19,
         "twenty": 20,
+        "thirty": 30,
+        "forty": 40,
     }
+
+    def spelled(word: str) -> int | None:
+        total = 0
+        for part in word.lower().split("-"):
+            value = units.get(part)
+            if value is None:
+                return None
+            total += value
+        return total
+
     text = index.read_text(encoding="utf-8")
-    stated = re.search(r"\b([A-Z][a-z]+) of twenty are written", text)
+    stated = re.search(r"\b([A-Za-z-]+) of ([A-Za-z-]+) are written", text)
     assert stated is not None, "the index no longer states a chapter count in the expected shape"
 
-    claimed = words.get(stated.group(1).lower())
+    claimed = spelled(stated.group(1))
+    outof = spelled(stated.group(2))
     assert claimed is not None, f"unrecognised number word: {stated.group(1)}"
+    assert outof is not None, f"unrecognised number word: {stated.group(2)}"
+    assert claimed == outof, (
+        f"the index says {stated.group(1).lower()} of {stated.group(2).lower()}; "
+        "the two halves of that sentence disagree"
+    )
     assert claimed == len(chapters), (
         f"the index says {stated.group(1).lower()} chapters are written and "
         f"{len(chapters)} files exist: {[p.name for p in chapters]}"
@@ -296,3 +328,119 @@ def test_the_book_index_counts_its_own_chapters() -> None:
     # nobody can navigate to is not published, it is stored.
     for chapter in chapters:
         assert chapter.name in text, f"{chapter.name} exists and the index does not link it"
+
+
+@pytest.mark.invariant
+def test_every_chapter_link_points_at_its_own_chapter() -> None:
+    """A link labelled "Chapter N" must resolve to chapter N's file.
+
+    Five of them did not, and they failed the same way: a chapter's closing
+    **Next** link was written while the next chapter did not exist yet, so it
+    pointed at the index with a parenthetical -- *"(not yet written)"*,
+    *"written at M3"*. The chapter then got written and nothing went back. One
+    of the five also carried chapter 13's **old title**, three days after it was
+    retitled.
+
+    `test_the_book_index_counts_its_own_chapters` could not see any of this. It
+    asks whether every chapter is linked *from the index*, which was true the
+    whole time. Nothing asked whether the chapters link to each other, and the
+    book is read by following those links rather than by rereading the index.
+    """
+    book = ROOT / "docs" / "book"
+    wrong: list[str] = []
+
+    for path in sorted(book.glob("[0-9]*.md")):
+        for label, href in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
+            target = href.split("#")[0]
+            if not target or target.startswith(("http", "mailto")):
+                continue
+            found = re.search(r"Chapter (\d+)", label)
+            if found is None:
+                continue
+            expected = f"{int(found.group(1)):02d}-"
+            if not target.startswith(expected):
+                wrong.append(f"{path.name}: {label.strip()!r} -> {target} (expected {expected}*)")
+
+    assert not wrong, "chapter links that do not point at their chapter:\n  " + "\n  ".join(wrong)
+
+
+@pytest.mark.invariant
+def test_the_chapters_form_one_unbroken_chain() -> None:
+    """Chapter N's forward link goes to N+1, and the last one has none.
+
+    Chapter 6 pointed at chapter 9, skipping 7 and 8 -- which were written
+    later, so when they arrived the chain simply routed around them. A reader
+    following the book end to end never saw the two chapters about the outage
+    and the register of findings.
+    """
+    book = ROOT / "docs" / "book"
+    chapters = sorted(book.glob("[0-9]*.md"))
+    numbers = [int(p.name[:2]) for p in chapters]
+    problems: list[str] = []
+
+    for path, number in zip(chapters, numbers, strict=True):
+        text = path.read_text(encoding="utf-8")
+        # Both conventions in use: "**Next:** [Chapter N …]" and a footer pair
+        # "[← Chapter N-1 …] · [Chapter N+1 … →]".
+        pattern = r"\[(?:[^\]]*?)Chapter (\d+)[^\]]*?\]\(\d\d-"
+        forward = {int(m) for m in re.findall(pattern, text)}
+        ahead = {n for n in forward if n > number}
+        is_last = number == max(numbers)
+        if is_last:
+            continue
+        nxt = min(numbers[numbers.index(number) + 1 :])
+        if nxt not in ahead:
+            problems.append(
+                f"{path.name} does not link forward to chapter {nxt}; it links ahead to "
+                f"{sorted(ahead) or 'nothing'}"
+            )
+
+    assert not problems, "the chain is broken:\n  " + "\n  ".join(problems)
+
+
+@pytest.mark.invariant
+def test_every_test_the_book_names_exists_or_says_it_is_historical() -> None:
+    """The book names 36 tests. A name that resolves to nothing reads as evidence.
+
+    `test_every_test_named_in_the_documents_exists` covers `ARCHITECTURE.md` and
+    `SECURITY.md` and has never looked at the book, which cites more test names
+    than either of them.
+
+    Two of the 36 are deliberately the names the defects *had*: four tests in
+    this project were renamed to what they actually guard, and for two of them
+    the rename **is** the fix, so chapter 14's register of tests-that-could-not
+    -fail would be falsified by quietly updating its own identifiers. Those are
+    allowed, and must say so in a parenthetical -- the same bargain as the
+    `(planned` marker, in the other direction: a reader can tell a live name
+    from a historical one without running anything.
+    """
+    live = {
+        node.name
+        for path in (ROOT / "apps" / "api" / "tests").glob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name.startswith("test_")
+    }
+    for path in list((ROOT / "apps" / "web" / "src").rglob("*.test.ts*")) + list(
+        (ROOT / "apps" / "web" / "e2e").rglob("*.spec.ts")
+    ):
+        live |= set(
+            re.findall(r"""(?:it|test)\(\s*["'`]([^"'`]+)""", path.read_text(encoding="utf-8"))
+        )
+
+    unmarked: list[str] = []
+    for path in sorted((ROOT / "docs" / "book").glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for found in re.finditer(r"`(test_[a-z0-9_]+)`", text):
+            name = found.group(1)
+            if name in live:
+                continue
+            tail = text[found.end() : found.end() + 140]
+            if "the name at the time" in tail or "(now " in tail:
+                continue
+            unmarked.append(f"{path.name}: {name}")
+
+    assert not unmarked, (
+        "the book names tests that do not exist and are not marked historical:\n  "
+        + "\n  ".join(unmarked)
+    )

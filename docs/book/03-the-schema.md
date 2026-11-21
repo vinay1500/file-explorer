@@ -1,7 +1,7 @@
 # Chapter 3 · The schema, line by line
 
 > Volume I · The Shape of Trees
-> Written at M2 · **built and verified in CI** · last verified 2026-11-14
+> Written at M2 · **built and verified in CI** · last verified 2026-11-21
 
 Two tables. Every line earns its place, and several exist because of a specific bug.
 
@@ -94,10 +94,16 @@ scopes by `owner_id`, which a single constraint could not express. PostgreSQL 15
 `length(btrim(name)) > 0`, and a name consisting of a single tab character sailed through it —
 so the bug it was written to fix was never actually fixed.
 
-The explicit set covers ASCII whitespace. **Unicode whitespace is not covered** — a name
-consisting of a single non-breaking space is storable today. Stripping and NFC-normalising
-belongs with the create and rename endpoints, which do not exist yet; there is currently no write
-path for a name at all. Recorded here rather than implied to be handled.
+The explicit set covers ASCII whitespace. **Unicode whitespace is not covered by the
+constraint** — a name consisting of a single non-breaking space satisfies it.
+<ins>**Updated 21 November.**</ins> When this was written there was no write path for a name at
+all, and the paragraph said so. There is now: `create` and `rename` arrived at M3a, and both
+**NFC-normalise and then apply a category rule** — `Cc`, `Cf`, `Cs`, `Zl`, `Zp`, plus the
+`Lo`-category Hangul fillers — before anything reaches the database. So the hole described here
+is closed in the service and still open in the constraint, which is the right division: the
+constraint makes a blank name impossible, the service makes an invisible one explainable.
+[Chapter 4](04-the-eight-invariants.md) has the full rule and the five characters deliberately
+allowed back in.
 
 > Proven by `test_whitespace_only_names_rejected`, which tries space, tab, newline and CRLF.
 

@@ -300,4 +300,4 @@ matter most would pass vacuously.
 
 ---
 
-**Next:** [Chapter 11 · The API contract](README.md) — written at M3.
+**Next:** [Chapter 11 · The API contract](11-the-api-contract.md)

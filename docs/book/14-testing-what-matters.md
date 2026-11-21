@@ -3,10 +3,15 @@
 > **Volume IV · Proof.** Not how many tests there are. Whether any of them would
 > notice.
 
-This project has 201 tests and that number is almost meaningless. What is not
-meaningless: **five of them, at different times, passed against the exact bug
-they were written to catch.** Each one read correctly. Each one was reviewed.
-Each proved nothing.
+This project has 400 tests — 284 against real PostgreSQL, 88 in the web unit
+suite, 28 in a browser — and that number is almost meaningless. What is not
+meaningless: **fifteen of them, at different times, passed against the exact
+bug they were written to catch.** Each one read correctly. Each one was
+reviewed. Each proved nothing.
+
+Five are set out below because they are five distinct shapes. The other ten are
+the same shapes recurring, and the list of them is in `docs/MUTATIONS.md`
+against the run that exposed each.
 
 This chapter is about how they were found, and what they have in common.
 
@@ -18,9 +23,14 @@ This chapter is about how they were found, and what they have in common.
 |---|---|---|---|
 | 1 | `test_move_to_root_does_not_delete_subtree` | Nothing — the service writes raw SQL, so no ORM object is ever constructed | Gate 3 on M2 |
 | 2 | `test_path_does_not_cross_owner` | A state it never built. The composite key makes it unreachable, so the walk had nothing to walk into | Gate 3 on M2 |
-| 3 | `test_a_create_cannot_slip_into_a_subtree_being_deleted` | That PostgreSQL's row locks work | Mutation |
-| 4 | `test_statement_timeout_is_recognised` | Three module constants, compared to themselves | Gate 3 on M3a |
+| 3 | `test_a_create_cannot_slip_into_a_subtree_being_deleted` *(the name at the time; it is `test_the_count_cannot_miss_a_create_that_was_in_flight` now)* | That PostgreSQL's row locks work | Mutation |
+| 4 | `test_statement_timeout_is_recognised` *(now split into `test_timeout_sqlstate_constants` and `test_postgres_raises_57014_on_statement_timeout`)* | Three module constants, compared to themselves | Gate 3 on M3a |
 | 5 | `test_the_documented_error_shape_is_the_one_actually_sent` | The media type, by **indexing** it as a literal dict key | Gate 3 on M3b |
+
+Two of those names no longer resolve, and they are kept because **they are the names the
+defects had.** Four tests in this project were renamed to what they actually guard — the
+rename *is* the fix in those two cases — so the table carries the old name with the current one
+beside it. A register that silently updates its own identifiers stops being a register.
 
 They are not five different mistakes. They are one mistake, five times:
 
@@ -70,8 +80,10 @@ behaviour it covers has been reverted and CI has gone red on it.
 4. Close the PR, delete the branch.
 ```
 
-Seventeen runs are recorded in [`docs/MUTATIONS.md`](../MUTATIONS.md) with run
-ids. Three are worth reading in full.
+**Fifty-one runs** are recorded in [`docs/MUTATIONS.md`](../MUTATIONS.md): 20
+carry a CI run id, 30 were run locally on throwaway branches, and **one is
+recorded as having survived.** Four are worth reading in full, and the fourth
+is the survivor.
 
 ### Run 8 — the suite stayed green
 
@@ -262,32 +274,39 @@ The whole isolation story — the thing that decides whether one person can read
 another's files — was untested at the layer facing the internet, in a file of
 contract tests that otherwise looked thorough.
 
-Six routes now get driven against another owner's node and must answer 404.
-Proven by mutation: with the caller's identity wrong, a listing came back
-`['mine', 'theirs']`.
+**Every route carrying a node id** now gets driven against another owner's node
+and must answer 404 — and the sweep is driven off `app.url_map` rather than a
+hand-written list, because the hand-written list covered six calls and M5 took
+the route count to eleven. A list would have gone on passing while covering
+six of them. Proven by mutation: with the caller's identity wrong, a listing
+came back `['mine', 'theirs']`.
 
 ---
 
 ## Questions you will be asked
 
-**Q31. You have 187 tests. How do you know they are any good?**
+**Q31. You have 400 tests. How do you know they are any good?**
 I do not know it from the count. I know it because every guard has been
-reverted and watched go red, and the runs are recorded with ids in
-`docs/MUTATIONS.md`. That is also how I know five of them were not good: they
-passed against the bug they were written for, and mutation is what said so.
-The count I would quote is the other one — five tests that could not fail,
-found and fixed.
+reverted and watched go red, and the runs are recorded in `docs/MUTATIONS.md`
+— fifty-one of them, twenty with a CI run id. That is also how I know fifteen
+of them were not good: they passed against the bug they were written for, and
+mutation is what said so. The count I would quote is the other one — **fifteen
+tests that could not fail, found and fixed, and one mutation that is recorded
+as having survived** because no test in the harness can see it.
 
 **Q32. Why not just require 100% coverage?**
-Because it buys a worse test suite. Fourteen lines here are genuinely out of
-reach — an unreachable assertion, a backstop that fires only after two other
-checks have failed, and races that need a precise interleaving against a real
-database. Demanding 100% means either deleting those guards or writing tests
-that execute them without asserting anything, and the second is how a suite
-fills up with tests that cannot fail. The floor is 98, it ratchets upward, and
-the exclusions are enumerated where the floor is set.
+Because it buys a worse test suite — but I have to be careful answering this
+one, because the number I used to give was wrong. I said fourteen lines were
+genuinely out of reach. Review checked each of the fourteen and **the claim
+held for exactly one**: an assertion that is unreachable by construction. The
+other thirteen were real failure paths I had written off, three of them
+contradicted inside the same change. So the honest answer is that 100% is
+still the wrong target — a suite told to reach every line fills up with tests
+that execute without asserting — but the exclusion list is **one line**, not
+fourteen, and it is enumerated where the floor is set. The floor is **99.5
+with branch coverage on**, and it ratchets.
 
-**Q33. Your coverage is 98% and you still shipped a blocking defect. So what is it for?**
+**Q33. Your coverage is over 99% and you still shipped a blocking defect. So what is it for?**
 Different jobs. Coverage answers "is there a test behind this line" — it found
 the health endpoint, the catch-all handler and both cursor branches, all of
 which had nothing. It cannot answer "is this line correct", and the M3a defect

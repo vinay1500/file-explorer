@@ -1,7 +1,7 @@
 # Chapter 8 · The register
 
 > Volume II · What Went Wrong
-> Written at M9 · **all twenty-four closed** · last verified 2026-11-19
+> Written at M9 · **all twenty-four closed** · last verified 2026-11-21
 
 Twenty-four findings came out of the audit of the April 2025 code. This chapter is the register
 itself, and then the part that matters more than the list: **how each one was obtained**, and
@@ -50,7 +50,7 @@ reviewer cares about.
 | F-14 | The delete button called `deleteNode` directly. No confirmation, and with F-03 above, one click scattered a folder's contents to the root | M6 · a confirmation that counts what is inside, and says so when it cannot |
 | F-15 | `FolderNode.jsx` and `FileNode.jsx` were never imported; `rootId` was set and never read; `selectedId` was permanently `null` with its setter commented out | M6 · the rebuild has no dead files |
 | F-11 | The API base URL was hardcoded to a Render hostname, with no environment variable | M6 · every URL is relative, enforced by a throw |
-| F-12 | The only test was Create React App's default `renders learn react link`, and `App.js` contained no such text — **so the one test in the repository failed** | M6 · 67 web tests and 9 in a browser |
+| F-12 | The only test was Create React App's default `renders learn react link`, and `App.js` contained no such text — **so the one test in the repository failed** | M6 · 88 web tests and 28 in a browser |
 | F-22 | `react-scripts@5.0.1` — Create React App, deprecated and unmaintained | M6 · Vite 7, React 19, TypeScript 5 |
 
 ### The repository itself
