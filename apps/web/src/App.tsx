@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "./api/client";
-import { signOut, whoAmI, type WhoAmI } from "./api/session";
-import { StillWaking, isColdStart, keepTrying, WAKE_BUDGET_MS, type WakeState } from "./api/wake";
+import { signOut, whoAmI } from "./api/session";
+import { keepTrying, WAKE_BUDGET_MS, type WakeState } from "./api/wake";
+import { explainFailure, type State } from "./failure";
 import { AuthPanel } from "./auth/AuthPanel";
 import { Explorer } from "./tree/Explorer";
 import { MoonGlyph, SunGlyph } from "./ui/icons";
@@ -23,56 +23,6 @@ import { applyTheme, initialTheme, storeTheme, type Theme } from "./ui/theme";
  * fault it was. Waiting for a cold start is what `wakeApi` is for, and this
  * component is what shows the waiting.
  */
-
-type State =
-  | { kind: "resolving" }
-  | { kind: "waking"; seconds: number }
-  | { kind: "anonymous" }
-  | { kind: "signed-in"; who: WhoAmI }
-  | { kind: "failed"; message: string; status?: number; canWake: boolean };
-
-function describe(error: unknown): State {
-  // **`request failed with 502` must never reach the screen.** It did, on the
-  // give-up path, after M8 had deleted it from the first-attempt path: the
-  // waiting panel counted to 51 seconds and then printed the one string this
-  // work exists to remove. A status code is not a sentence.
-  if (error instanceof StillWaking) {
-    return {
-      kind: "failed",
-      canWake: true,
-      message:
-        `The server is taking longer than usual to wake up. I waited ` +
-        `${String(Math.round(error.waitedMs / 1000))} seconds. It's a free instance, so this ` +
-        `happens; another go usually catches it.`,
-    };
-  }
-  if (error instanceof ApiError) {
-    if (error.status === 503) {
-      return {
-        kind: "failed",
-        status: 503,
-        canWake: false,
-        message:
-          "The server's up but it can't reach its database. Waiting won't help with this one. " +
-          "If you're seeing this, something is genuinely broken and I'd like to know.",
-      };
-    }
-    if (isColdStart(error)) {
-      return {
-        kind: "failed",
-        status: error.status,
-        canWake: true,
-        message: "The server didn't answer. It may still be starting up.",
-      };
-    }
-    return { kind: "failed", status: error.status, canWake: false, message: error.message };
-  }
-  return {
-    kind: "failed",
-    canWake: true,
-    message: "I couldn't reach the server. Nothing answered at all.",
-  };
-}
 
 /**
  * How long the very first attempt may stay silent.
@@ -161,7 +111,7 @@ export function App() {
       );
       setState(who ? { kind: "signed-in", who } : { kind: "anonymous" });
     } catch (error: unknown) {
-      setState(describe(error));
+      setState(explainFailure(error));
     } finally {
       clearTimeout(sayItIsWaking);
       waking.current = false;
@@ -179,7 +129,7 @@ export function App() {
       await signOut();
       setState({ kind: "anonymous" });
     } catch (error: unknown) {
-      setState(describe(error));
+      setState(explainFailure(error));
     } finally {
       setBusy(false);
     }
@@ -262,7 +212,7 @@ export function App() {
 
         {state.kind === "anonymous" && (
           <div className="panel">
-            <AuthPanel onSession={resolve} onFailure={(e) => setState(describe(e))} />
+            <AuthPanel onSession={resolve} onFailure={(e) => setState(explainFailure(e))} />
           </div>
         )}
 
