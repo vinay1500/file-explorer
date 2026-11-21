@@ -1,7 +1,7 @@
 # Chapter 17 · Architecture on no budget
 
 > Volume IV · The Practice
-> Written at M1 · **partly built** — hosting lands at M7 · last verified 2026-11-14
+> Written at M1 · **built and deployed** · last verified 2026-11-21
 
 Every component is free. Each free tier has a limit that will bite if it is not written down,
 and [Chapter 7](07-the-silent-outage.md) is what happens when one is not.
@@ -13,7 +13,7 @@ and [Chapter 7](07-the-silent-outage.md) is what happens when one is not.
 | Source & CI | GitHub public repo + Actions | $0 | Free and unmetered **on public repositories** |
 | Database (demo) | Neon free | $0 | 1 GB/project, 100 CU-hours/month, 10 branches, **no expiry, no card**, and a compute that suspends after 5 min idle — mandatory, not configurable |
 | Database (dev & test) | a container in CI | $0 | ephemeral per job; created and destroyed every run |
-| API hosting | Render free web service | $0 | spins down after 15 min idle, ~50 s wake, 750 instance-hours/month |
+| API hosting | Render free web service | $0 | spins down after 15 min idle, **32.5 s wake measured**, 750 instance-hours/month — and a **throttle on how often it may be woken**, which is the constraint nothing documents |
 | Web hosting | Vercel Hobby | $0 | non-commercial use only |
 | Monitoring | scheduled Actions workflow | $0 | best-effort scheduling — see below |
 | Browsers for E2E | Playwright in Actions | $0 | runs on the free public-repo runners |
@@ -147,6 +147,31 @@ day before asserted the literal `<name>.onrender.com` appeared in `vercel.json` 
 enforces a wrong value is worse than no guard: it is an argument against fixing the bug,
 producible on demand as evidence the file was fine.
 
+**And the free instance limits how often it may be woken.** <ins>Added 21 November.</ins> This
+is the fourth constraint, it is the one that took longest to find, and it is not on any pricing
+page. After a day of opening the demo repeatedly to check fixes, the deployed page started
+answering:
+
+```
+HTTP/2 429            content-type: text/plain
+x-render-routing: hibernate-rate-limited
+```
+
+Not our rate limiter — the limits in this project are 120/minute globally and 5/minute on guest
+sign-in, and neither was close. **The platform throttles wake-ups of a hibernating service**, and
+there is no documented window and no `Retry-After`. It clears on its own in minutes.
+
+The reason it is in this chapter rather than filed as a bug: the three constraints above were all
+discovered by *deploying*, and this one could only be discovered by **using the deployment
+heavily**, which is a different activity and one nothing in a repository does. A free tier that
+sleeps is a documented cost. A free tier that rations being woken is a cost you find by being the
+tenth visitor in an hour — or, as here, by being one person testing ten times.
+
+What it changed: nothing in the infrastructure, because nothing can. The page now says what is
+happening in words, says that no button will help, and says it clears by itself. That is the
+whole fix, and it is the same fix as the cold start — **state the constraint rather than fight
+it** — one level further out.
+
 ## The limit that is not the limit
 
 Flask-Limiter's default storage is in-memory and therefore *per process*, and this deployment
@@ -178,4 +203,4 @@ the difference between a working demo and a year and a half of silence.
 
 ---
 
-**Next:** [Chapter 18 · Questions and answers](README.md) — written across M3 to M5.
+**Next:** [Chapter 18 · Questions and answers](18-questions-and-answers.md)

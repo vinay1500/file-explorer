@@ -380,4 +380,4 @@ only asked "does it mention `owner_id`" was vacuous against exactly that.
 
 ---
 
-**Next:** [Chapter 13 · The frontend contract](README.md) — written at M6.
+**Next:** [Chapter 13 · The client that could not say null](13-the-client-that-could-not-say-null.md)

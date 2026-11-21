@@ -104,7 +104,7 @@ collation provider   b (builtin)
 ```
 
 So the cluster default there **is** byte order, same as in CI. The provider is
-PostgreSQL 17's `builtin`, which sorts by code point and carries no library
+PostgreSQL 18's `builtin`, which sorts by code point and carries no library
 version to drift — and for UTF-8, code point order and byte order are the same
 order, so `C.UTF-8` and `COLLATE "C"` agree.
 
@@ -115,11 +115,20 @@ future change — a different provider, a restore into a locale-collated cluster
 a provider changing its own default — and that is a smaller, duller benefit
 than the one it was briefly credited with.
 
-The hole that does remain is the one mutation 10 found, and it is a hole in the
-*suite*, not in production: with both databases C-collated, nothing can tell
-"ordering is byte order because the indexes are pinned" from "ordering is byte
-order because the default already was". A second container with a real locale
-would restore that distinction. Worth having, and no longer urgent.
+The hole that did remain was the one mutation 10 found, and it was a hole in
+the *suite*, not in production: with both databases C-collated, nothing could
+tell "ordering is byte order because the indexes are pinned" from "ordering is
+byte order because the default already was".
+
+<ins>**Closed, and this paragraph was six days out of date.**</ins> It said a
+second container with a real locale "would restore that distinction. Worth
+having, and no longer urgent." That container exists and runs on every pull
+request as the **`non-C collation`** job — it stands up a database initialised
+to a real locale and runs the ordering assertions against it, so a pinned index
+and an agreeable default are distinguishable again.
+[Chapter 18](18-questions-and-answers.md) Q18 has said so for days, which is
+the part worth noticing: **two chapters of one book disagreed, and the one that
+sounded tentative was the stale one.**
 
 **The pattern worth keeping is not the collation. It is that a one-sentence
 query settled in forty seconds what two paragraphs of reasoning had got
@@ -148,8 +157,9 @@ collation internals change. None of those *has* to break anything here, and
 arguing about which ones might is wasted effort when CI answers it in
 forty-five seconds for free: change the pin, push, read the result.
 
-It came back green — 201 tests, 99.78% branch coverage, the schema assertions
-intact, on 18.7. The useful part is not that it passed. It is that the question
+It came back green — 201 tests at the time, 99.78% branch coverage, the schema
+assertions intact, on 18.7. The suite is **284** against PostgreSQL now, and
+the floor has ratcheted to 99.5. The useful part is not that it passed. It is that the question
 was settled by running it rather than by reasoning about release notes, and
 that the answer now holds for the version actually deployed.
 

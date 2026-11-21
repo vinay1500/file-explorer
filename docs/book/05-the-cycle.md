@@ -1,7 +1,7 @@
 # Chapter 5 · The cycle
 
 > Volume II · What Went Wrong
-> Written at M2 · **fixed and tested** · last verified 2026-11-14
+> Written at M2 · **fixed and tested** · last verified 2026-11-21
 
 Eight lines of Python that look complete and are not. This is the project's defining bug.
 

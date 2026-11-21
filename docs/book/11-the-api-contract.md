@@ -2,6 +2,7 @@
 
 > **Volume III · The surface.** What a client can rely on, and what happens when it asks for
 > something impossible. The tree logic is chapters 5, 6, 9 and 10; this is the layer over it.
+> Written at M3b · last verified 2026-11-21
 
 The routes are thin on purpose. Every one does the same four things — ask who is calling, decode
 the inputs, call one service method, shape the output — and none of them contains a rule about
@@ -149,7 +150,12 @@ from Python, where `None` passes through happily.
 
 ## The authentication seam
 
-There is no authentication yet. Every route still calls `require_actor()`.
+<ins>**This section described a seam waiting to be used. It has been used — M5 landed on
+17–18 November, and the paragraphs below are kept because the seam working as designed is the
+claim they were making.**</ins> What follows is how it stood at M3b;
+[chapter 12](12-identity-and-isolation.md) is what went through it.
+
+At M3b there was no authentication. Every route called `require_actor()`.
 
 ```python
 def require_actor() -> int:
@@ -162,6 +168,12 @@ def require_actor() -> int:
 **M5 changes the body of one function.** The alternative — adding authentication later by
 threading an actor through every route — is how a service ends up with two or three routes that
 forgot, and those are precisely the ones that let one user read another's tree.
+
+> <ins>**It held.**</ins> M5's diff is a module, a service, a blueprint and the fixtures.
+> **Not one route changed.** `require_actor()` now reads an answer that a `before_request` hook
+> has already settled onto `g`, rather than computing one — which also moved authentication
+> ahead of `@blp.arguments`, so an unauthenticated caller sending a nonsense body gets 401
+> instead of a 422 describing a schema they are not allowed to use.
 
 Two details make it a seam rather than a stub:
 
@@ -181,12 +193,42 @@ Two details make it a seam rather than a stub:
 |---|---|---|
 | `MAX_CONTENT_LENGTH` | 16 KB | A name is at most 255 characters. Werkzeug raises 413 before reading the body, so without it the limit is however much memory the worker has. |
 | Page size | 50 default, 200 maximum | A caller-supplied limit is an input, not an instruction. |
-| Rate limit | 120/minute | **In-memory, so per process** — four workers means four times the limit, and a restart clears it. The sharper one is the other direction: it keys on `remote_addr`, so behind a proxy without `ProxyFix` every caller in the world shares one bucket and the limit becomes an outage switch. `TRUST_PROXY_HOPS` decides which, and defaults to 0. |
+| Rate limit | 120/minute global; **10/minute** on the credential routes, **5/minute** on guest sign-in | **In-memory, so per process** — this deployment runs two gunicorn workers, so a caller gets the configured limit twice over, and a restart clears it. Measured, not assumed: twelve rapid requests returned two interleaved `X-RateLimit-Remaining` sequences with two different `X-RateLimit-Reset` values. The sharper problem is the other direction: it keys on `remote_addr`, so behind a proxy without `ProxyFix` every caller in the world shares one bucket and the limit becomes an outage switch. `TRUST_PROXY_HOPS` decides which; it defaults to 0 and is **3** in production, measured from the access log. |
 | `Cache-Control` | `no-store`, everywhere | Every body is one owner's tree, and identity becomes a cookie at M5 — which a CDN does not key on. |
 
 The rate limit row is the one worth reading. It is wrong anywhere but a single instance, and the
 comment in the configuration says so rather than implying a guarantee it does not have. Pointing
 `RATELIMIT_STORAGE_URI` at Redis fixes it; there is no Redis on a free tier.
+
+### And a 429 that is not this limiter at all
+
+<ins>Added 21 November.</ins> The demo returned `request failed with 429` to a visitor, and the
+first instinct was that one of the limits above had been hit. **It had not.** Measured through
+the rewrite before anything was changed:
+
+```
+HTTP/2 429
+content-type: text/plain; charset=utf-8
+x-render-routing: hibernate-rate-limited
+
+Too Many Requests
+```
+
+That is **the host**, throttling how often a sleeping free instance may be woken — a constraint
+no pricing page mentions and which only appears after somebody has been waking the thing
+repeatedly. Two consequences for this chapter.
+
+First, **a client cannot assume a 429 is ours.** Ours is an RFC 9457 document with
+`code: RATE_LIMITED`; the host's is `text/plain`, so nothing parses and the problem is `null`.
+The client now tells them apart on exactly that and says different things: ours clears in
+seconds, the host's in minutes and no button helps.
+
+Second, it is the reason `explainFailure` exists in the shape it does. It had handled three
+statuses by name and returned the exception's own message for the rest — which is
+`request failed with <status>` whenever the body is not a problem document. **The function
+opened with a comment forbidding precisely that.** The fix was not a 429 branch; it was removing
+every path that can return an unframed message, with a test that drives sixteen statuses rather
+than the three somebody thought of.
 
 ---
 

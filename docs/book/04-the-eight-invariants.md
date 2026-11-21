@@ -1,7 +1,7 @@
 # Chapter 4 · The eight invariants
 
 > Volume I · The Shape of Trees
-> Written at M2 · **all eight have passing tests** · last verified 2026-11-14
+> Written at M2 · **all eight have passing tests** · last verified 2026-11-21
 
 An invariant is a statement that is true before an operation and true after it, whatever the
 operation was. These eight define what "a valid tree" means here. Everything in Volume III

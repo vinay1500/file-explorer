@@ -1,7 +1,7 @@
 # Chapter 6 · The orphans
 
 > Volume II · What Went Wrong
-> Written at M2 · **fixed and tested** · last verified 2026-11-14
+> Written at M2 · **fixed and tested** · last verified 2026-11-21
 
 One line with a default nobody reads. Deleting a folder did not delete what was inside it — it
 emptied the contents onto the root.
@@ -176,4 +176,4 @@ rule in `CONTRIBUTING.md` rather than a preference.
 
 ---
 
-**Next:** [Chapter 9 · Recursive CTEs](09-recursive-ctes.md)
+**Next:** [Chapter 7 · The silent outage](07-the-silent-outage.md)

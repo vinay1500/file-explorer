@@ -26,9 +26,12 @@ different claim. It says the process works on you.
 
 The follow-up they will ask is *"how do you know there aren't more?"* The honest answer is that
 you do not, and that the practice is to revert each guard on a throwaway branch and watch CI go
-red — twenty-one of those runs are recorded in `docs/MUTATIONS.md` with the run id that caught
-each. And that two of them **failed to apply**: a mutation that silently does nothing looks
-exactly like a guard that works, which is the same failure one level up.
+red — **fifty-one of those runs are recorded** in `docs/MUTATIONS.md`, twenty with the CI run id
+that caught each. And three things went wrong with the practice itself, which is the part worth
+telling: two mutations **failed to apply** — one that silently does nothing looks exactly like a
+guard that works — and **one survived everything**, including a test written specifically to
+catch it. That one is recorded as survived rather than quietly dropped, because a mutation log
+listing only the ones that bit is a brochure.
 
 ---
 
@@ -138,4 +141,6 @@ matters.
 
 ---
 
-[← Chapter 19 · Six deep dives](README.md) · [Back to the book](README.md)
+**Next:** [Chapter 21 · Reading the code, in the order it runs](21-reading-the-code.md)
+
+[← Chapter 19 · Six deep dives](19-five-deep-dives.md) · [Back to the book](README.md)

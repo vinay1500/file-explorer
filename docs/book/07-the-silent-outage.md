@@ -148,5 +148,6 @@ whether a lesson was learned.
 
 ---
 
-**Related:** [Chapter 17 · Architecture on no budget](17-architecture-on-no-budget.md) ·
-[Chapter 8 · The register](README.md) *(not yet written)*
+**Related:** [Chapter 17 · Architecture on no budget](17-architecture-on-no-budget.md)
+
+**Next:** [Chapter 8 · The register](08-the-register.md)

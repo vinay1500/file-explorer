@@ -19,11 +19,17 @@ A chapter exists once it has something true to say. Empty placeholder files are 
 absent ones, so for most of this project's life the table below had gaps, and each gap meant
 that milestone had not landed yet.
 
-Twenty of twenty are written, and the number is a count of the files rather than a target — a
-test asserts that this sentence and the directory agree, and that every chapter is linked,
-because the count has been wrong twice. Every claim in them is either forensics on code that
-shipped in April 2025, or a statement about code in this repository that names the test proving
-it.
+Twenty-two of twenty-two are written, and the number is a count of the files rather than a
+target — a test asserts that this sentence and the directory agree, that every chapter is linked
+from here, **that every chapter link points at its own chapter, and that the forward chain has no
+gap in it.** The count had been wrong twice. The links were worse: five of them pointed back at
+this index, each one written while the next chapter did not exist yet and never updated when it
+arrived, and chapter 6 skipped straight over 7 and 8 — so a reader following the book end to end
+never saw the outage or the register. The index test could not see any of that, because it only
+ever asked whether this page links to the chapters.
+
+Every claim in them is either forensics on code that shipped in April 2025, or a statement about
+code in this repository that names the test proving it.
 
 ---
 
@@ -79,6 +85,16 @@ The machinery around the code.
 | 18 | [Questions and answers](18-questions-and-answers.md) | **written** · Q1–Q19; the rest live in their own chapters |
 | 19 | [Six deep dives](19-five-deep-dives.md) | **written** |
 | 20 | [The stories to tell](20-the-stories-to-tell.md) | **written** |
+
+## Volume VI · The Tour
+
+Where to start reading the code itself. Both chapters follow the same journey — one drag, from
+the pixel to the row and back — once as a map and once as a story.
+
+| # | Chapter | Status |
+|---|---|---|
+| 21 | [Reading the code, in the order it runs](21-reading-the-code.md) | **written** · eleven stops, each with the line to put your cursor on |
+| 22 | [The same tour, as a story](22-the-same-tour-as-a-story.md) | **written** · the same walk in prose, no line numbers |
 
 ---
 

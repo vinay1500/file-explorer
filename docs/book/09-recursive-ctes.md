@@ -1,7 +1,7 @@
 # Chapter 9 · Recursive CTEs
 
 > Volume III · The Rebuild
-> Written at M2 · **built and tested** · last verified 2026-11-14
+> Written at M2, extended at M3a · **built and tested** · last verified 2026-11-21
 
 The tool that makes an adjacency list practical: a single SQL statement that walks a chain of
 unknown length.
@@ -182,9 +182,24 @@ Migration 0002 rebuilds both under `COLLATE "C"`: byte order, no locale, no libr
 drift with. The cost is `Zebra` before `apple`, which is a display concern and belongs to the
 client. What pagination and uniqueness need is only that the order is *stable*.
 
-> Recreating a unique index under `"C"` cannot fail on existing data. The default collations are
-> deterministic, so they already treat two different byte strings as unequal; `"C"` makes no more
-> pairs equal than they were. It can only be more permissive, never less.
+> <del>Recreating a unique index under `"C"` cannot fail on existing data. The default
+> collations are deterministic, so they already treat two different byte strings as unequal;
+> `"C"` makes no more pairs equal than they were. It can only be more permissive, never
+> less.</del>
+>
+> **Withdrawn 15 November, and the correction sat in the change log for six days before it
+> reached this paragraph.** The argument above is about *which pairs compare equal*, and that
+> part is sound. It is not what makes a `CREATE UNIQUE INDEX` fail. A **non-deterministic**
+> collation — ICU with `deterministic = false`, which is exactly what a database restored from
+> a locale-collated cluster can carry — treats canonically equivalent strings as equal, so two
+> rows that were distinct under the old index collide under the new one and the migration
+> aborts on precisely the databases this migration exists for. Migration 0002 now **looks for
+> duplicates first and names them** rather than discovering them mid-rebuild.
+>
+> Worth more than the fix: the claim was wrong *and recorded as corrected*, and the chapter
+> went on asserting it anyway. The book's rule is that corrections are appended rather than
+> edited — which is a rule about the change log, and the change log kept it. Nothing connected
+> the log to the prose it corrected.
 
 ### Why the test reads the catalogue instead of comparing sort orders
 
